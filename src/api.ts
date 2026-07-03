@@ -1,0 +1,143 @@
+// ============================================================
+// OFICINAHUB — cliente API + fila offline (IndexedDB)
+// ============================================================
+import { openDB } from 'idb'
+import { useSession } from './session'
+
+const API = import.meta.env.VITE_API_URL || ''
+
+// ── Fetch autenticado com refresh automático ─────────────────
+export async function api(path: string, opts: RequestInit = {}): Promise<any> {
+  const s = useSession.getState()
+  const doFetch = (token: string | null) =>
+    fetch(`${API}${path}`, {
+      ...opts,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(opts.headers || {}),
+      },
+    })
+
+  let res = await doFetch(s.accessToken)
+
+  if (res.status === 401 && s.refreshToken) {
+    const r = await fetch(`${API}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: s.refreshToken }),
+    })
+    if (r.ok) {
+      const { accessToken } = await r.json()
+      useSession.getState().setSession({ accessToken })
+      res = await doFetch(accessToken)
+    } else {
+      useSession.getState().logout()
+      location.href = '/login'
+      throw new Error('Sessão expirada')
+    }
+  }
+
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw Object.assign(new Error(data.error || 'Erro'), { status: res.status, data })
+  return data
+}
+
+// ── Fila offline em IndexedDB ────────────────────────────────
+const dbp = openDB('oficinahub-offline', 1, {
+  upgrade(db) {
+    if (!db.objectStoreNames.contains('queue'))
+      db.createObjectStore('queue', { keyPath: 'offlineId' })
+    if (!db.objectStoreNames.contains('photos'))
+      db.createObjectStore('photos', { keyPath: 'key' })
+  },
+})
+
+export const offline = {
+  async enqueueReception(payload: Record<string, unknown>): Promise<string> {
+    const offlineId = crypto.randomUUID()
+    const db = await dbp
+    await db.put('queue', {
+      offlineId, entityType: 'reception', payload,
+      createdAt: new Date().toISOString(),
+    })
+    return offlineId
+  },
+
+  async savePhotoBlob(offlineId: string, zone: string, blob: Blob, meta: any) {
+    const db = await dbp
+    await db.put('photos', { key: `${offlineId}:${zone}:${Date.now()}`, offlineId, zone, blob, meta })
+  },
+
+  async pendingCount(): Promise<number> {
+    const db = await dbp
+    return db.count('queue')
+  },
+
+  async syncAll(): Promise<{ ok: number; failed: number }> {
+    const db = await dbp
+    const items = await db.getAll('queue')
+    if (!items.length) return { ok: 0, failed: 0 }
+
+    const res = await api('/api/v1/sync/push', {
+      method: 'POST',
+      body: JSON.stringify({
+        items: items.map(i => ({
+          offlineId: i.offlineId, entityType: i.entityType, payload: i.payload,
+        })),
+      }),
+    })
+
+    let ok = 0, failed = 0
+    for (const r of res.results) {
+      if (r.status === 'ok') {
+        // Enviar fotos guardadas offline desta JO
+        const allPhotos = await db.getAll('photos')
+        const mine = allPhotos.filter((p: any) => p.offlineId === r.offlineId)
+        for (const p of mine) {
+          try {
+            await uploadPhoto(r.joId, p.zone, p.blob, p.meta)
+            await db.delete('photos', p.key)
+          } catch { /* fica para a próxima sync */ }
+        }
+        await db.delete('queue', r.offlineId)
+        ok++
+      } else failed++
+    }
+    return { ok, failed }
+  },
+}
+
+// ── Upload de foto: pede URL assinada e envia directo ao Storage ──
+export async function uploadPhoto(
+  joId: string, zone: string, blob: Blob,
+  meta: { isRequired?: boolean; latitude?: number; longitude?: number } = {}
+) {
+  const presign = await api(`/api/v1/receptions/${joId}/photos/presign`, {
+    method: 'POST',
+    body: JSON.stringify({ zone, ...meta, contentType: blob.type || 'image/jpeg' }),
+  })
+  const put = await fetch(presign.uploadUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': blob.type || 'image/jpeg' },
+    body: blob,
+  })
+  if (!put.ok) throw new Error('Upload falhou')
+  return presign.photoId
+}
+
+// ── Auto-sync ao recuperar ligação ───────────────────────────
+export function startAutoSync(onSynced?: (r: { ok: number; failed: number }) => void) {
+  const trySync = async () => {
+    if (!navigator.onLine) return
+    const count = await offline.pendingCount()
+    if (count === 0) return
+    try {
+      const result = await offline.syncAll()
+      onSynced?.(result)
+    } catch { /* tenta na próxima */ }
+  }
+  window.addEventListener('online', trySync)
+  setInterval(trySync, 60_000)   // tenta a cada minuto
+  trySync()
+}
