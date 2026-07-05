@@ -138,6 +138,22 @@ const DMG_GROUPS: { group: string; icon: string; zones: string[] }[] = [
 
 interface Damage { id: string; area: string; note: string; photo: Blob | null }
 
+// ── Validações refinadas (premium: ajudam, não bloqueiam à toa) ──
+const V = {
+  // Telemóvel internacional: aceita qualquer país. Só exige dígitos suficientes.
+  // (7 a 15 dígitos — norma E.164 — com + / espaços / hífens / parênteses opcionais)
+  phone: (v: string) => {
+    const digits = v.replace(/[^\d]/g, '')
+    return digits.length >= 7 && digits.length <= 15
+  },
+  // Matrícula: aceita qualquer formato do mundo. Só exige um mínimo.
+  plate: (v: string) => v.trim().replace(/\s/g, '').length >= 3,
+  email: (v: string) => v === '' || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v),
+  year: (v: string) => { const y = Number(v); return !v || (y >= 1950 && y <= new Date().getFullYear() + 1) },
+  km: (v: string) => { const k = Number(v); return k >= 0 && k < 2_000_000 },
+}
+
+
 function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void }) {
   const [step, setStep] = useState(0)
   const [units, setUnits] = useState<any[]>([])
@@ -158,8 +174,10 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
   const [plate, setPlate] = useState(''); const [brand, setBrand] = useState('')
   const [model, setModel] = useState(''); const [vyear, setVyear] = useState('')
 
-  const [svcDesc, setSvcDesc] = useState(''); const [svcType, setSvcType] = useState('Tuning / Performance')
+  const [svcDesc, setSvcDesc] = useState(''); const [svcType, setSvcType] = useState('')
   const [unitId, setUnitId] = useState('')
+  const [services, setServices] = useState<any[]>([])
+  const [loadingSvc, setLoadingSvc] = useState(false)
 
   const [km, setKm] = useState(''); const [fuel, setFuel] = useState(2)
   const [checklist, setChecklist] = useState<Record<string, boolean>>({})
@@ -186,6 +204,16 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
       p => setGps({ lat: p.coords.latitude, lng: p.coords.longitude }),
       () => {}, { enableHighAccuracy: true, timeout: 8000 })
   }, [])
+
+  // Carrega os serviços do sector escolhido — só esses aparecem
+  useEffect(() => {
+    if (!unitId) return
+    setLoadingSvc(true); setSvcType('')
+    api(`/api/v1/services?unitId=${unitId}`)
+      .then(r => setServices(r.data))
+      .catch(() => setServices([]))
+      .finally(() => setLoadingSvc(false))
+  }, [unitId])
 
   useEffect(() => {
     if (existingCust || newCust) return
@@ -229,10 +257,10 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
 
   const canNext = (): boolean => {
     switch (step) {
-      case 0: return !!existingCust || (newCust && custName.trim().length >= 2 && custPhone.trim().length >= 6)
-      case 1: return !!existingVeh || (newVeh && plate.trim().length >= 3) || (!!existingCust && custVehicles.length === 0 && plate.trim().length >= 3) || (!existingCust && plate.trim().length >= 3)
-      case 2: return svcDesc.trim().length >= 3
-      case 3: return valuables.trim().length > 0 && km.trim().length > 0
+      case 0: return !!existingCust || (newCust && custName.trim().length >= 2 && V.phone(custPhone) && V.email(custEmail))
+      case 1: return !!existingVeh || (V.plate(plate) && V.year(vyear))
+      case 2: return !!svcType && svcDesc.trim().length >= 3
+      case 3: return valuables.trim().length > 0 && V.km(km)
       case 4: return true                       // danos são opcionais
       case 5: return reqCount >= 6 && !!kmPhoto
       case 6: return allTc && !!sigData
@@ -358,10 +386,12 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
                 <div><label className="fl">Nome completo <span className="req">*</span></label>
                   <input autoFocus value={custName} onChange={e => setCustName(e.target.value)} placeholder="Nome do cliente" /></div>
                 <div><label className="fl">Telemóvel <span className="req">*</span></label>
-                  <input type="tel" value={custPhone} onChange={e => setCustPhone(e.target.value)} placeholder="+258 84 000 0000" /></div>
+                  <input type="tel" value={custPhone} onChange={e => setCustPhone(e.target.value)} placeholder="+258 84 000 0000" />
+                  {custPhone.length >= 6 && !V.phone(custPhone) && <div className="field-warn">Número de telefone inválido.</div>}</div>
               </div>
               <div style={{ marginTop: 14 }}><label className="fl">Email (opcional)</label>
-                <input type="email" value={custEmail} onChange={e => setCustEmail(e.target.value)} placeholder="email@exemplo.com" /></div>
+                <input type="email" value={custEmail} onChange={e => setCustEmail(e.target.value)} placeholder="email@exemplo.com" />
+                {!V.email(custEmail) && <div className="field-warn">Email com formato inválido.</div>}</div>
             </>
           )}
           <div className="rec-nav"><span />
@@ -400,19 +430,14 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
                 <button className="btn-ghost btn-sm" style={{ marginBottom: 10 }} onClick={() => setNewVeh(false)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Ver carros do cliente</button>}
               <div className="grid3">
                 <div><label className="fl">Matrícula <span className="req">*</span></label>
-                  <input value={plate} onChange={e => setPlate(e.target.value)} placeholder="MZA 0000" style={{ textTransform: 'uppercase', fontWeight: 500 }} /></div>
+                  <input value={plate} onChange={e => setPlate(e.target.value)} placeholder="Matrícula da viatura" style={{ textTransform: 'uppercase', fontWeight: 500 }} /></div>
                 <div><label className="fl">Marca</label><input value={brand} onChange={e => setBrand(e.target.value)} placeholder="ex: Subaru" /></div>
                 <div><label className="fl">Modelo</label><input value={model} onChange={e => setModel(e.target.value)} placeholder="ex: Impreza" /></div>
               </div>
               <div style={{ marginTop: 14, maxWidth: 160 }}><label className="fl">Ano</label>
-                <input type="number" value={vyear} onChange={e => setVyear(e.target.value)} placeholder="2020" /></div>
+                <input type="number" value={vyear} onChange={e => setVyear(e.target.value)} placeholder="2020" />
+                {!V.year(vyear) && <div className="field-warn">Ano inválido.</div>}</div>
             </>
-          )}
-          {units.length > 1 && (
-            <div style={{ marginTop: 16 }}><label className="fl">Unidade</label>
-              <select value={unitId} onChange={e => setUnitId(e.target.value)}>
-                {units.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select></div>
           )}
           <div className="rec-nav">
             <button className="btn-ghost" onClick={() => setStep(0)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
@@ -421,18 +446,50 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
         </section>
       )}
 
-      {/* 3 — SERVIÇO */}
+      {/* 3 — SERVIÇO (filtrado por sector) */}
       {step === 2 && (
         <section>
           <h2>Serviço pretendido</h2>
-          <p className="lead">O que traz o cliente. É a base do orçamento.</p>
-          <label className="fl">Tipo de serviço</label>
-          <select value={svcType} onChange={e => setSvcType(e.target.value)}>
-            <option>Tuning / Performance</option><option>Revisão geral</option>
-            <option>Reparação</option><option>Diagnóstico</option><option>Outro</option>
-          </select>
-          <label className="fl" style={{ marginTop: 14 }}>Descrição / queixa do cliente <span className="req">*</span></label>
-          <textarea value={svcDesc} onChange={e => setSvcDesc(e.target.value)} rows={3} placeholder="O que o cliente pediu ou o sintoma relatado…" />
+          <p className="lead">Cada sector oferece os seus serviços. Escolhe o que traz o cliente.</p>
+
+          {units.length > 1 && (
+            <>
+              <label className="fl">Sector</label>
+              <div className="sector-tabs">
+                {units.map(u => (
+                  <button key={u.id} className={`sector-tab ${unitId === u.id ? 'on' : ''}`} onClick={() => setUnitId(u.id)}>
+                    <i className={`ti ${u.type === 'workshop_tuning' ? 'ti-rocket' : u.type === 'store' ? 'ti-building-store' : 'ti-tools'}`} aria-hidden="true"></i>
+                    {u.name.replace(/^FIT — /, '').replace(/^FIT /, '')}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          <label className="fl" style={{ marginTop: 18 }}>Serviço <span className="req">*</span></label>
+          {loadingSvc && <div className="hint">A carregar serviços…</div>}
+          {!loadingSvc && services.length === 0 && <div className="hint">Este sector ainda não tem serviços configurados.</div>}
+          {Object.entries(
+            services.reduce((acc: Record<string, any[]>, s) => {
+              (acc[s.category || 'Serviços'] ||= []).push(s); return acc
+            }, {})
+          ).map(([cat, list]) => (
+            <div key={cat} className="svc-group">
+              <div className="svc-cat">{cat}</div>
+              <div className="svc-grid">
+                {(list as any[]).map(s => (
+                  <button key={s.id} className={`svc-card ${svcType === s.name ? 'on' : ''}`} onClick={() => setSvcType(s.name)}>
+                    <span className="svc-name">{s.name}</span>
+                    {s.est_hours && <span className="svc-hrs">~{s.est_hours}h</span>}
+                    {svcType === s.name && <span className="svc-check"><i className="ti ti-check" aria-hidden="true"></i></span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          <label className="fl" style={{ marginTop: 18 }}>Descrição / queixa do cliente <span className="req">*</span></label>
+          <textarea value={svcDesc} onChange={e => setSvcDesc(e.target.value)} rows={3} placeholder="Detalhes, sintomas ou pedidos específicos do cliente…" />
           <div className="info-note"><i className="ti ti-info-circle" style={{ fontSize: 16 }} aria-hidden="true"></i><span>Após a recepção, o orçamento vai ao cliente para aprovação digital. Nada é executado sem aprovação.</span></div>
           <div className="rec-nav">
             <button className="btn-ghost" onClick={() => setStep(1)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
