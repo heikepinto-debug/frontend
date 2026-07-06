@@ -145,6 +145,17 @@ const DMG_GROUPS: { group: string; icon: string; zones: string[] }[] = [
 
 interface Damage { id: string; area: string; note: string; photo: Blob | null }
 
+// Formata número no estilo local (1000 → 1.000)
+const MZmt = (n: number): string => new Intl.NumberFormat('pt-PT').format(n)
+
+// Converte um Blob para base64 (sem prefixo data-url)
+const blobToBase64 = (b: Blob): Promise<string> => new Promise((res, rej) => {
+  const r = new FileReader()
+  r.onload = () => res(String(r.result).split(',')[1])
+  r.onerror = rej
+  r.readAsDataURL(b)
+})
+
 // ── Validações refinadas (premium: ajudam, não bloqueiam à toa) ──
 const V = {
   // Telemóvel internacional: aceita qualquer país. Só exige dígitos suficientes.
@@ -162,6 +173,7 @@ const V = {
 
 
 function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void }) {
+  const tenant = useSession(s => s.tenant)
   const [step, setStep] = useState(0)
   const [units, setUnits] = useState<any[]>([])
   const [terms, setTerms] = useState<any>(null)
@@ -195,7 +207,9 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
   const [dmgGroup, setDmgGroup] = useState(0)
 
   const [photos, setPhotos] = useState<Record<string, Blob>>({})
+  const [idDoc, setIdDoc] = useState<Blob | null>(null)   // foto do documento de identificação
 
+  const [handedOff, setHandedOff] = useState(false)       // colaborador entregou o tablet ao cliente
   const [tc, setTc] = useState([false, false, false])
   const [sigData, setSigData] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -249,6 +263,7 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
       const id = z.replace('__dmg__', '')
       setDamages(ds => ds.map(d => d.id === id ? { ...d, photo: f } : d))
     }
+    else if (z === '__iddoc__') setIdDoc(f)
     else setPhotos(p => ({ ...p, [z]: f }))   // zonas 360° e painel juntos
     e.target.value = ''
   }
@@ -273,7 +288,7 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
 
   const canNext = (): boolean => {
     switch (step) {
-      case 0: return !!existingCust || (newCust && custName.trim().length >= 2 && V.phone(custPhone) && V.email(custEmail))
+      case 0: return !!existingCust || (newCust && custName.trim().length >= 2 && V.phone(custPhone) && V.email(custEmail) && !!idDoc)
       case 1: return !!existingVeh || (V.plate(plate) && V.year(vyear))
       case 2: return intentions.length >= 1
       case 3: return valuables.trim().length > 0 && V.km(km)
@@ -308,6 +323,12 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
         if (photos[z.key]) await uploadPhoto(jo.id, z.key, photos[z.key], { isRequired: true, latitude: gps?.lat, longitude: gps?.lng })
       for (const d of damages)
         if (d.photo) await uploadPhoto(jo.id, `damage-${d.id}`, d.photo, { latitude: gps?.lat, longitude: gps?.lng })
+      if (idDoc) {
+        const b64 = await blobToBase64(idDoc)
+        await api(`/api/v1/receptions/${jo.id}/id-document`, {
+          method: 'POST', body: JSON.stringify({ imageBase64: b64 }),
+        })
+      }
       if (sigData) await api(`/api/v1/receptions/${jo.id}/sign`, {
         method: 'POST', body: JSON.stringify({ signatureBase64: sigData.split(',')[1] }),
       })
@@ -318,6 +339,7 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
         if (photos[z.key]) await offline.savePhotoBlob(offlineId, z.key, photos[z.key], { isRequired: true, latitude: gps?.lat, longitude: gps?.lng })
       for (const d of damages)
         if (d.photo) await offline.savePhotoBlob(offlineId, `damage-${d.id}`, d.photo, {})
+      if (idDoc) await offline.savePhotoBlob(offlineId, 'id-document', idDoc, {})
       setResult({ number: 'Pendente (offline)', offline: true })
     } finally { setBusy(false) }
   }
@@ -407,6 +429,13 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
               <div style={{ marginTop: 14 }}><label className="fl">Email (opcional)</label>
                 <input type="email" value={custEmail} onChange={e => setCustEmail(e.target.value)} placeholder="email@exemplo.com" />
                 {!V.email(custEmail) && <div className="field-warn">Email com formato inválido.</div>}</div>
+
+              <label className="fl" style={{ marginTop: 16 }}>Documento de identificação <span className="req">*</span></label>
+              <p className="hint" style={{ marginTop: 0, marginBottom: 8 }}>Foto do BI, passaporte ou carta — confirma a identidade de quem assina.</p>
+              <button className={`photo-slot km ${idDoc ? 'done' : ''}`} onClick={() => takePhoto('__iddoc__')}>
+                {idDoc ? <img src={URL.createObjectURL(idDoc)} alt="documento" /> : <span className="photo-icon"><i className="ti ti-id" aria-hidden="true"></i></span>}
+                <span>Documento</span>
+              </button>
             </>
           )}
           <div className="rec-nav"><span />
@@ -632,16 +661,33 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
         </section>
       )}
 
-      {/* 7 — TERMOS + ASSINATURA */}
-      {step === 6 && (
+      {/* 7 — ENTREGA AO CLIENTE + TERMOS + ASSINATURA */}
+      {step === 6 && !handedOff && (
+        <section className="handoff">
+          <div className="handoff-ic"><i className="ti ti-device-tablet" aria-hidden="true"></i></div>
+          <h2>Entregue o tablet ao cliente</h2>
+          <p className="handoff-text">
+            A seguir vão ser apresentados os <strong>Termos e Condições</strong> da {tenant?.name || 'oficina'}.
+            O cliente deve lê-los, aceitá-los e assinar no ecrã.
+          </p>
+          <p className="handoff-sub">Quando o cliente estiver com o tablet, toque em continuar.</p>
+          <button className="btn-primary handoff-btn" onClick={() => setHandedOff(true)}>
+            Continuar <i className="ti ti-arrow-right" aria-hidden="true"></i>
+          </button>
+          <button className="btn-ghost" style={{ marginTop: 10 }} onClick={() => setStep(5)}>
+            <i className="ti ti-arrow-left" aria-hidden="true"></i> Voltar
+          </button>
+        </section>
+      )}
+      {step === 6 && handedOff && (
         <section>
-          <h2>Termos e assinatura</h2>
-          <p className="lead">O cliente lê, aceita e assina. A ordem de trabalho fica selada e arquivada.</p>
+          <h2>Termos e Condições</h2>
+          <p className="lead">Leia, aceite e assine para concluir a entrada da viatura.</p>
           <div className="tc-scroll">{terms?.content || 'A carregar termos…'}</div>
           {[
             'Li e aceito os Termos e Condições, incluindo o registo fotográfico como prova do estado da viatura.',
-            `Aceito a política de parqueamento — ${terms?.parking_fee || 500} MZN/dia após ${terms?.parking_grace_hours || 48}h de aviso de conclusão.`,
-            'Autorizo diagnóstico e o tratamento dos meus dados para gestão do serviço.',
+            `Aceito a política de parqueamento — ${MZmt(terms?.parking_fee ?? 1000)} MZN/dia após ${terms?.parking_grace_days ?? 7} dias do aviso de conclusão.`,
+            'Autorizo o diagnóstico e o tratamento dos meus dados, incluindo o documento de identificação, para gestão do serviço.',
           ].map((label, i) => (
             <button key={i} className={`chk tc ${tc[i] ? 'on' : ''}`} onClick={() => setTc(t => t.map((v, j) => j === i ? !v : v))}>
               <span className="chk-box">{tc[i] && <i className="ti ti-check" aria-hidden="true"></i>}</span>{label}
@@ -650,7 +696,7 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
           <label className="fl" style={{ marginTop: 14 }}>Assinatura do cliente <span className="req">*</span></label>
           <SignaturePad onChange={setSigData} />
           <div className="rec-nav">
-            <button className="btn-ghost" onClick={() => setStep(5)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
+            <button className="btn-ghost" onClick={() => setHandedOff(false)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
             <button className="btn-primary" disabled={!canNext() || busy} onClick={submit}>
               {busy ? 'A finalizar…' : <>Finalizar <i className="ti ti-check" aria-hidden="true"></i></>}
             </button>
@@ -719,25 +765,54 @@ function SignaturePad({ onChange }: { onChange: (dataUrl: string | null) => void
 }
 
 // ── Lista de recepções ───────────────────────────────────────
+const STATUS_LABEL: Record<string, string> = {
+  reception: 'Em recepção',
+  awaiting_diagnosis: 'Aguarda diagnóstico',
+  awaiting_quote: 'Aguarda orçamento',
+  quote_sent: 'Orçamento enviado',
+  approved: 'Aprovado',
+  in_progress: 'Em execução',
+  quality_check: 'Controlo de qualidade',
+  ready: 'Pronto para levantar',
+  delivered: 'Entregue',
+  cancelled: 'Cancelado',
+}
+
 function ReceptionList({ onBack }: { onBack: () => void }) {
   const [rows, setRows] = useState<any[]>([])
+  const [pdfBusy, setPdfBusy] = useState<string | null>(null)
   useEffect(() => { api('/api/v1/receptions').then(r => setRows(r.data)).catch(() => {}) }, [])
+
+  const exportPdf = async (joId: string) => {
+    setPdfBusy(joId)
+    try {
+      const r = await api(`/api/v1/receptions/${joId}/pdf`)
+      if (r.url) window.open(r.url, '_blank')
+    } catch { alert('Não foi possível gerar o PDF agora.') }
+    finally { setPdfBusy(null) }
+  }
+
   return (
     <main className="reception">
-      <div className="rec-header">
-        <button className="btn-ghost" onClick={onBack}>← Início</button>
-        <h2 style={{ margin: 0 }}>Recepções</h2><span />
+      <div className="rec-top" style={{ marginBottom: 20 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
+        <h2 style={{ margin: 0, fontSize: 20 }}>Recepções</h2><span />
       </div>
       <div className="list">
         {rows.map(r => (
           <div key={r.id} className="list-row">
             <span className="jo-num">{r.number}</span>
             <span className="plate">{r.plate}</span>
-            <div style={{ flex: 1 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
               <div className="list-name">{r.customer_name}</div>
               <div className="list-sub">{r.brand} {r.model} · {r.photo_count} fotos{r.signed_at ? ' · assinada' : ''}</div>
             </div>
-            <span className={`status s-${r.status}`}>{r.status}</span>
+            <span className={`status s-${r.status}`}>{STATUS_LABEL[r.status] || r.status}</span>
+            {r.signed_at && (
+              <button className="btn-ghost btn-sm" disabled={pdfBusy === r.id} onClick={() => exportPdf(r.id)} title="Exportar PDF de entrada">
+                <i className={`ti ${pdfBusy === r.id ? 'ti-loader' : 'ti-file-type-pdf'}`} aria-hidden="true"></i>
+              </button>
+            )}
           </div>
         ))}
         {rows.length === 0 && <p className="empty">Ainda sem recepções.</p>}

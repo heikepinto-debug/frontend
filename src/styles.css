@@ -215,3 +215,11 @@ textarea { resize: vertical; line-height: 1.55; }
 .dash-label { font-weight: 500; font-size: 12px; line-height: 1.3; text-align: center; }
 .dash-hint { font-size: 10px; color: var(--ink-3); text-align: center; margin-top: 2px; }
 .photo-slot.dash.done .dash-label { position: relative; z-index: 1; background: rgba(0,0,0,.6); color: #fff; padding: 4px 8px; border-radius: 10px; }
+
+/* ── Ecrã de entrega ao cliente ──────────────────────────── */
+.handoff { text-align: center; padding: 40px 24px; animation: fade .3s ease; }
+.handoff-ic { width: 76px; height: 76px; border-radius: 20px; background: var(--brand-bg); color: var(--brand); display: flex; align-items: center; justify-content: center; font-size: 38px; margin: 0 auto 22px; }
+.handoff h2 { font-size: 24px; font-weight: 600; letter-spacing: -.02em; margin-bottom: 14px; }
+.handoff-text { font-size: 16px; color: var(--ink-2); line-height: 1.65; max-width: 440px; margin: 0 auto 10px; }
+.handoff-sub { font-size: 13px; color: var(--ink-3); margin-bottom: 28px; }
+.handoff-btn { font-size: 16px; padding: 15px 32px; justify-content: center; }
