@@ -223,3 +223,31 @@ textarea { resize: vertical; line-height: 1.55; }
 .handoff-text { font-size: 16px; color: var(--ink-2); line-height: 1.65; max-width: 440px; margin: 0 auto 10px; }
 .handoff-sub { font-size: 13px; color: var(--ink-3); margin-bottom: 28px; }
 .handoff-btn { font-size: 16px; padding: 15px 32px; justify-content: center; }
+
+/* ── Pesquisa na lista ───────────────────────────────────── */
+.search-box { display: flex; align-items: center; gap: 9px; padding: 0 14px; background: var(--s2); border: 1px solid var(--line-2); border-radius: var(--radius-sm); margin-bottom: 16px; }
+.search-box i { color: var(--ink-3); font-size: 17px; }
+.search-box input { border: none; padding: 12px 0; background: none; }
+.search-box input:focus { box-shadow: none; }
+.search-clear { border: none; background: none; color: var(--ink-3); cursor: pointer; padding: 4px; display: flex; }
+.search-clear:hover { color: var(--danger); }
+.btn-ghost.danger:hover { background: var(--danger-bg); color: var(--danger); }
+
+/* ── Ecrã de sucesso ─────────────────────────────────────── */
+.success-actions { display: flex; flex-direction: column; gap: 10px; max-width: 320px; margin: 0 auto; }
+
+/* ── Resumo do cliente ───────────────────────────────────── */
+.review-card { background: var(--s2); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; margin-bottom: 18px; }
+.review-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 13px 16px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.review-row:last-child { border-bottom: none; }
+.review-row span { color: var(--ink-2); }
+.review-row strong { color: var(--ink); font-weight: 600; text-align: right; }
+.review-block { margin-bottom: 18px; }
+.review-block-title { font-size: 12px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px; }
+.review-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.review-chip { padding: 7px 13px; border-radius: 20px; background: var(--brand-bg); color: var(--brand-dark); font-size: 13px; font-weight: 500; }
+.review-damage { display: flex; align-items: center; gap: 10px; padding: 9px 0; font-size: 14px; color: var(--ink); }
+.review-damage-n { width: 22px; height: 22px; border-radius: 50%; background: var(--danger-bg); color: var(--danger); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+.review-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 8px; }
+.review-photo { aspect-ratio: 1; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
+.review-photo img { width: 100%; height: 100%; object-fit: cover; }

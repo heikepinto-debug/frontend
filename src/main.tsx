@@ -210,10 +210,11 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
   const [idDoc, setIdDoc] = useState<Blob | null>(null)   // foto do documento de identificação
 
   const [handedOff, setHandedOff] = useState(false)       // colaborador entregou o tablet ao cliente
+  const [reviewed, setReviewed] = useState(false)         // cliente reviu o resumo
   const [tc, setTc] = useState([false, false, false])
   const [sigData, setSigData] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<{ number: string; offline: boolean } | null>(null)
+  const [result, setResult] = useState<{ number: string; offline: boolean; joId?: string } | null>(null)
 
   const fileRef = useRef<HTMLInputElement>(null)
   const pendingZone = useRef<string>('')
@@ -332,7 +333,7 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
       if (sigData) await api(`/api/v1/receptions/${jo.id}/sign`, {
         method: 'POST', body: JSON.stringify({ signatureBase64: sigData.split(',')[1] }),
       })
-      setResult({ number: jo.number, offline: false })
+      setResult({ number: jo.number, offline: false, joId: jo.id })
     } catch {
       const offlineId = await offline.enqueueReception(payload)
       for (const z of allReq)
@@ -352,7 +353,18 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
         <p>{result.offline
           ? 'Recepção guardada no tablet. Sincroniza automaticamente quando houver internet.'
           : 'Ordem de trabalho criada, fotos carregadas e documento assinado arquivado.'}</p>
-        <button className="btn-primary" onClick={onDone} style={{ justifyContent: 'center' }}>Ver recepções</button>
+        <div className="success-actions">
+          {!result.offline && result.joId && (
+            <button className="btn-primary" style={{ justifyContent: 'center' }}
+              onClick={async () => {
+                try { const r = await api(`/api/v1/receptions/${result.joId}/pdf`); if (r.url) window.open(r.url, '_blank') }
+                catch { alert('Não foi possível abrir o PDF agora.') }
+              }}>
+              <i className="ti ti-printer" aria-hidden="true"></i> Imprimir documento
+            </button>
+          )}
+          <button className={result.offline ? 'btn-primary' : 'btn-ghost'} onClick={onDone} style={{ justifyContent: 'center' }}>Ver recepções</button>
+        </div>
       </div>
     </main>
   )
@@ -667,8 +679,8 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
           <div className="handoff-ic"><i className="ti ti-device-tablet" aria-hidden="true"></i></div>
           <h2>Entregue o tablet ao cliente</h2>
           <p className="handoff-text">
-            A seguir vão ser apresentados os <strong>Termos e Condições</strong> da {tenant?.name || 'oficina'}.
-            O cliente deve lê-los, aceitá-los e assinar no ecrã.
+            A seguir, o cliente vai <strong>rever o que foi registado</strong> e depois ler e assinar
+            os <strong>Termos e Condições</strong> da {tenant?.name || 'oficina'}.
           </p>
           <p className="handoff-sub">Quando o cliente estiver com o tablet, toque em continuar.</p>
           <button className="btn-primary handoff-btn" onClick={() => setHandedOff(true)}>
@@ -679,7 +691,60 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
           </button>
         </section>
       )}
-      {step === 6 && handedOff && (
+
+      {/* Resumo para o CLIENTE rever com os próprios olhos */}
+      {step === 6 && handedOff && !reviewed && (
+        <section>
+          <h2>Confirme os seus dados</h2>
+          <p className="lead">Verifique se está tudo correcto antes de assinar. Se algo estiver errado, avise o nosso colaborador.</p>
+
+          <div className="review-card">
+            <div className="review-row"><span>Cliente</span><strong>{existingCust ? existingCust.full_name : custName}</strong></div>
+            <div className="review-row"><span>Viatura</span><strong>{existingVeh ? `${existingVeh.brand || ''} ${existingVeh.model || ''}`.trim() : `${brand} ${model}`.trim() || '—'}</strong></div>
+            <div className="review-row"><span>Matrícula</span><strong>{(existingVeh ? existingVeh.plate : plate).toUpperCase()}</strong></div>
+            <div className="review-row"><span>Quilometragem</span><strong>{km ? `${MZmt(Number(km))} km` : '—'}</strong></div>
+            <div className="review-row"><span>Combustível</span><strong>{Math.round(fuel / 8 * 100)}%</strong></div>
+            <div className="review-row"><span>Objectos declarados</span><strong>{valuables}</strong></div>
+          </div>
+
+          <div className="review-block">
+            <div className="review-block-title">O que pediu</div>
+            <div className="review-chips">
+              {intentions.map(it => <span key={it} className="review-chip">{it}</span>)}
+            </div>
+          </div>
+
+          {damages.length > 0 && (
+            <div className="review-block">
+              <div className="review-block-title">Danos registados à entrada</div>
+              {damages.map((d, i) => (
+                <div key={d.id} className="review-damage">
+                  <span className="review-damage-n">{i + 1}</span>
+                  <span>{d.area}{d.note ? ` — ${d.note}` : ''}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="review-block">
+            <div className="review-block-title">Fotos tiradas ({[...REQ_ZONES, ...DASH_ZONES].filter(z => photos[z.key]).length})</div>
+            <div className="review-photos">
+              {[...REQ_ZONES, ...DASH_ZONES].map(z => photos[z.key] && (
+                <div key={z.key} className="review-photo">
+                  <img src={URL.createObjectURL(photos[z.key])} alt={z.label} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rec-nav">
+            <button className="btn-ghost" onClick={() => setHandedOff(false)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Voltar</button>
+            <button className="btn-primary" onClick={() => setReviewed(true)}>Está tudo correcto <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
+          </div>
+        </section>
+      )}
+
+      {step === 6 && handedOff && reviewed && (
         <section>
           <h2>Termos e Condições</h2>
           <p className="lead">Leia, aceite e assine para concluir a entrada da viatura.</p>
@@ -696,7 +761,7 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
           <label className="fl" style={{ marginTop: 14 }}>Assinatura do cliente <span className="req">*</span></label>
           <SignaturePad onChange={setSigData} />
           <div className="rec-nav">
-            <button className="btn-ghost" onClick={() => setHandedOff(false)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
+            <button className="btn-ghost" onClick={() => setReviewed(false)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
             <button className="btn-primary" disabled={!canNext() || busy} onClick={submit}>
               {busy ? 'A finalizar…' : <>Finalizar <i className="ti ti-check" aria-hidden="true"></i></>}
             </button>
@@ -779,9 +844,22 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 function ReceptionList({ onBack }: { onBack: () => void }) {
+  const canDelete = useSession(s => s.can('jobdelete:any'))
   const [rows, setRows] = useState<any[]>([])
   const [pdfBusy, setPdfBusy] = useState<string | null>(null)
-  useEffect(() => { api('/api/v1/receptions').then(r => setRows(r.data)).catch(() => {}) }, [])
+  const [search, setSearch] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  const load = (q = '') => {
+    setLoading(true)
+    api(`/api/v1/receptions${q ? `?search=${encodeURIComponent(q)}` : ''}`)
+      .then(r => setRows(r.data)).catch(() => {}).finally(() => setLoading(false))
+  }
+  useEffect(() => { load() }, [])
+  useEffect(() => {
+    const t = setTimeout(() => load(search.trim()), 300)
+    return () => clearTimeout(t)
+  }, [search])
 
   const exportPdf = async (joId: string) => {
     setPdfBusy(joId)
@@ -792,12 +870,29 @@ function ReceptionList({ onBack }: { onBack: () => void }) {
     finally { setPdfBusy(null) }
   }
 
+  const remove = async (jo: any) => {
+    const hard = confirm(`Apagar DEFINITIVAMENTE a entrada ${jo.number}?\n\nOK = apagar de vez (para testes)\nCancelar = manter`)
+    if (!hard) return
+    try {
+      await api(`/api/v1/receptions/${jo.id}?hard=true`, { method: 'DELETE' })
+      setRows(rs => rs.filter(r => r.id !== jo.id))
+    } catch { alert('Não foi possível apagar.') }
+  }
+
   return (
     <main className="reception">
-      <div className="rec-top" style={{ marginBottom: 20 }}>
+      <div className="rec-top" style={{ marginBottom: 16 }}>
         <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
         <h2 style={{ margin: 0, fontSize: 20 }}>Recepções</h2><span />
       </div>
+
+      <div className="search-box">
+        <i className="ti ti-search" aria-hidden="true"></i>
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Procurar por matrícula, cliente ou nº da JO…" />
+        {search && <button className="search-clear" onClick={() => setSearch('')}><i className="ti ti-x" aria-hidden="true"></i></button>}
+      </div>
+
       <div className="list">
         {rows.map(r => (
           <div key={r.id} className="list-row">
@@ -813,9 +908,14 @@ function ReceptionList({ onBack }: { onBack: () => void }) {
                 <i className={`ti ${pdfBusy === r.id ? 'ti-loader' : 'ti-file-type-pdf'}`} aria-hidden="true"></i>
               </button>
             )}
+            {canDelete && (
+              <button className="btn-ghost btn-sm danger" onClick={() => remove(r)} title="Apagar entrada">
+                <i className="ti ti-trash" aria-hidden="true"></i>
+              </button>
+            )}
           </div>
         ))}
-        {rows.length === 0 && <p className="empty">Ainda sem recepções.</p>}
+        {!loading && rows.length === 0 && <p className="empty">{search ? 'Nada encontrado para essa pesquisa.' : 'Ainda sem recepções.'}</p>}
       </div>
     </main>
   )
