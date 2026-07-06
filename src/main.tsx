@@ -123,6 +123,13 @@ const REQ_ZONES = [
   { key: 'left', label: 'Lado esq.' }, { key: 'right', label: 'Lado dir.' },
   { key: 'roof', label: 'Tecto' }, { key: 'interior', label: 'Interior' },
 ]
+// Fotos do painel — obrigatórias. Documentam o estado eléctrico à entrada.
+const DASH_ZONES = [
+  { key: 'dash_ign', label: 'Painel: ignição ON, motor OFF', hint: 'Mostra as luzes de aviso acesas' },
+  { key: 'dash_run', label: 'Painel: motor ON', hint: 'O que fica aceso a trabalhar' },
+  { key: 'km', label: 'Conta-km em foco', hint: 'Leitura clara dos quilómetros' },
+]
+const REQ_TOTAL = REQ_ZONES.length + DASH_ZONES.length   // 9 fotos obrigatórias
 const CHECKLIST = ['Livrete / documentos','Chaves entregues','Triângulo + colete',
   'Pneu suplente + macaco','Rádio com código','Tapetes originais']
 
@@ -174,10 +181,11 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
   const [plate, setPlate] = useState(''); const [brand, setBrand] = useState('')
   const [model, setModel] = useState(''); const [vyear, setVyear] = useState('')
 
-  const [svcDesc, setSvcDesc] = useState(''); const [svcType, setSvcType] = useState('')
+  const [intentions, setIntentions] = useState<string[]>([])   // intenções múltiplas do cliente
+  const [intentInput, setIntentInput] = useState('')
+  const [svcDesc, setSvcDesc] = useState('')
   const [unitId, setUnitId] = useState('')
-  const [services, setServices] = useState<any[]>([])
-  const [loadingSvc, setLoadingSvc] = useState(false)
+  const [services, setServices] = useState<any[]>([])          // catálogo, só p/ sugestões
 
   const [km, setKm] = useState(''); const [fuel, setFuel] = useState(2)
   const [checklist, setChecklist] = useState<Record<string, boolean>>({})
@@ -187,7 +195,6 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
   const [dmgGroup, setDmgGroup] = useState(0)
 
   const [photos, setPhotos] = useState<Record<string, Blob>>({})
-  const [kmPhoto, setKmPhoto] = useState<Blob | null>(null)
 
   const [tc, setTc] = useState([false, false, false])
   const [sigData, setSigData] = useState<string | null>(null)
@@ -205,15 +212,16 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
       () => {}, { enableHighAccuracy: true, timeout: 8000 })
   }, [])
 
-  // Carrega os serviços do sector escolhido — só esses aparecem
+  // Carrega o catálogo de todas as unidades — só para SUGESTÕES ao escrever
   useEffect(() => {
-    if (!unitId) return
-    setLoadingSvc(true); setSvcType('')
-    api(`/api/v1/services?unitId=${unitId}`)
-      .then(r => setServices(r.data))
-      .catch(() => setServices([]))
-      .finally(() => setLoadingSvc(false))
-  }, [unitId])
+    if (units.length === 0) return
+    Promise.all(units.map(u => api(`/api/v1/services?unitId=${u.id}`).then(r => r.data).catch(() => [])))
+      .then(lists => {
+        const all = lists.flat()
+        const seen = new Set<string>()
+        setServices(all.filter((s: any) => { if (seen.has(s.name)) return false; seen.add(s.name); return true }))
+      })
+  }, [units])
 
   useEffect(() => {
     if (existingCust || newCust) return
@@ -237,14 +245,20 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]; if (!f) return
     const z = pendingZone.current
-    if (z === '__km__') setKmPhoto(f)
-    else if (z.startsWith('__dmg__')) {
+    if (z.startsWith('__dmg__')) {
       const id = z.replace('__dmg__', '')
       setDamages(ds => ds.map(d => d.id === id ? { ...d, photo: f } : d))
     }
-    else setPhotos(p => ({ ...p, [z]: f }))
+    else setPhotos(p => ({ ...p, [z]: f }))   // zonas 360° e painel juntos
     e.target.value = ''
   }
+
+  const addIntention = (v: string) => {
+    const t = v.trim()
+    if (t && !intentions.includes(t)) setIntentions(xs => [...xs, t])
+    setIntentInput('')
+  }
+  const removeIntention = (v: string) => setIntentions(xs => xs.filter(x => x !== v))
 
   const addDamage = (area: string) =>
     setDamages(ds => [...ds, { id: crypto.randomUUID().slice(0, 8), area, note: '', photo: null }])
@@ -253,16 +267,18 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
     setDamages(ds => ds.map(d => d.id === id ? { ...d, note } : d))
 
   const reqCount = REQ_ZONES.filter(z => photos[z.key]).length
+  const dashCount = DASH_ZONES.filter(z => photos[z.key]).length
+  const totalReq = reqCount + dashCount
   const allTc = tc.every(Boolean)
 
   const canNext = (): boolean => {
     switch (step) {
       case 0: return !!existingCust || (newCust && custName.trim().length >= 2 && V.phone(custPhone) && V.email(custEmail))
       case 1: return !!existingVeh || (V.plate(plate) && V.year(vyear))
-      case 2: return !!svcType && svcDesc.trim().length >= 3
+      case 2: return intentions.length >= 1
       case 3: return valuables.trim().length > 0 && V.km(km)
       case 4: return true                       // danos são opcionais
-      case 5: return reqCount >= 6 && !!kmPhoto
+      case 5: return totalReq >= REQ_TOTAL       // 6 zonas + 3 painel, todas obrigatórias
       case 6: return allTc && !!sigData
       default: return true
     }
@@ -280,16 +296,16 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
       declaredValuables: valuables || 'Nenhum objecto declarado',
       checklist,
       damageZones: damages.map(d => ({ id: d.id, area: d.area, note: d.note })),
-      serviceType: svcType, serviceDescription: svcDesc,
+      intentions, serviceDescription: svcDesc || undefined,
       termsVersion: terms?.version || '1.0',
       termsAcceptedAt: new Date().toISOString(),
     }
+    const allReq = [...REQ_ZONES, ...DASH_ZONES]   // 9 fotos obrigatórias
     try {
       if (!navigator.onLine) throw new Error('OFFLINE')
       const jo = await api('/api/v1/receptions', { method: 'POST', body: JSON.stringify(payload) })
-      for (const z of REQ_ZONES)
+      for (const z of allReq)
         if (photos[z.key]) await uploadPhoto(jo.id, z.key, photos[z.key], { isRequired: true, latitude: gps?.lat, longitude: gps?.lng })
-      if (kmPhoto) await uploadPhoto(jo.id, 'km', kmPhoto, { latitude: gps?.lat, longitude: gps?.lng })
       for (const d of damages)
         if (d.photo) await uploadPhoto(jo.id, `damage-${d.id}`, d.photo, { latitude: gps?.lat, longitude: gps?.lng })
       if (sigData) await api(`/api/v1/receptions/${jo.id}/sign`, {
@@ -298,9 +314,8 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
       setResult({ number: jo.number, offline: false })
     } catch {
       const offlineId = await offline.enqueueReception(payload)
-      for (const z of REQ_ZONES)
+      for (const z of allReq)
         if (photos[z.key]) await offline.savePhotoBlob(offlineId, z.key, photos[z.key], { isRequired: true, latitude: gps?.lat, longitude: gps?.lng })
-      if (kmPhoto) await offline.savePhotoBlob(offlineId, 'km', kmPhoto, {})
       for (const d of damages)
         if (d.photo) await offline.savePhotoBlob(offlineId, `damage-${d.id}`, d.photo, {})
       setResult({ number: 'Pendente (offline)', offline: true })
@@ -320,7 +335,7 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
     </main>
   )
 
-  const steps = ['Cliente', 'Viatura', 'Serviço', 'Estado', 'Danos', 'Fotos', 'Assinatura']
+  const steps = ['Cliente', 'Viatura', 'Intenção', 'Estado', 'Danos', 'Fotos', 'Assinatura']
 
   return (
     <main className="reception">
@@ -446,51 +461,50 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
         </section>
       )}
 
-      {/* 3 — SERVIÇO (filtrado por sector) */}
+      {/* 3 — INTENÇÃO DO CLIENTE (fluida, múltipla) */}
       {step === 2 && (
         <section>
-          <h2>Serviço pretendido</h2>
-          <p className="lead">Cada sector oferece os seus serviços. Escolhe o que traz o cliente.</p>
+          <h2>O que traz o cliente</h2>
+          <p className="lead">Escreve tudo o que o cliente pediu ou relatou. Podes adicionar vários. O serviço a executar define-se depois, no diagnóstico.</p>
 
-          {units.length > 1 && (
-            <>
-              <label className="fl">Sector</label>
-              <div className="sector-tabs">
-                {units.map(u => (
-                  <button key={u.id} className={`sector-tab ${unitId === u.id ? 'on' : ''}`} onClick={() => setUnitId(u.id)}>
-                    <i className={`ti ${u.type === 'workshop_tuning' ? 'ti-rocket' : u.type === 'store' ? 'ti-building-store' : 'ti-tools'}`} aria-hidden="true"></i>
-                    {u.name.replace(/^FIT — /, '').replace(/^FIT /, '')}
-                  </button>
-                ))}
-              </div>
-            </>
+          <label className="fl">Intenção do cliente <span className="req">*</span></label>
+          <div className="intent-input-row">
+            <input value={intentInput}
+              onChange={e => setIntentInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addIntention(intentInput) } }}
+              placeholder="ex: barulho na frente, quer Stage 2, revisão…" list="svc-suggest" />
+            <datalist id="svc-suggest">
+              {services.map(s => <option key={s.id} value={s.name} />)}
+            </datalist>
+            <button className="btn-primary" disabled={!intentInput.trim()} onClick={() => addIntention(intentInput)} style={{ padding: '12px 16px' }}>
+              <i className="ti ti-plus" aria-hidden="true"></i>
+            </button>
+          </div>
+
+          {services.length > 0 && (
+            <div className="intent-suggest">
+              {services.slice(0, 8).map(s => (
+                <button key={s.id} className="intent-chip-suggest" onClick={() => addIntention(s.name)}>
+                  <i className="ti ti-plus" style={{ fontSize: 12 }} aria-hidden="true"></i>{s.name}
+                </button>
+              ))}
+            </div>
           )}
 
-          <label className="fl" style={{ marginTop: 18 }}>Serviço <span className="req">*</span></label>
-          {loadingSvc && <div className="hint">A carregar serviços…</div>}
-          {!loadingSvc && services.length === 0 && <div className="hint">Este sector ainda não tem serviços configurados.</div>}
-          {Object.entries(
-            services.reduce((acc: Record<string, any[]>, s) => {
-              (acc[s.category || 'Serviços'] ||= []).push(s); return acc
-            }, {})
-          ).map(([cat, list]) => (
-            <div key={cat} className="svc-group">
-              <div className="svc-cat">{cat}</div>
-              <div className="svc-grid">
-                {(list as any[]).map(s => (
-                  <button key={s.id} className={`svc-card ${svcType === s.name ? 'on' : ''}`} onClick={() => setSvcType(s.name)}>
-                    <span className="svc-name">{s.name}</span>
-                    {s.est_hours && <span className="svc-hrs">~{s.est_hours}h</span>}
-                    {svcType === s.name && <span className="svc-check"><i className="ti ti-check" aria-hidden="true"></i></span>}
-                  </button>
-                ))}
-              </div>
+          {intentions.length > 0 && (
+            <div className="intent-list">
+              {intentions.map(it => (
+                <span key={it} className="intent-chip">
+                  {it}
+                  <button className="intent-x" onClick={() => removeIntention(it)} aria-label="Remover"><i className="ti ti-x" aria-hidden="true"></i></button>
+                </span>
+              ))}
             </div>
-          ))}
+          )}
 
-          <label className="fl" style={{ marginTop: 18 }}>Descrição / queixa do cliente <span className="req">*</span></label>
-          <textarea value={svcDesc} onChange={e => setSvcDesc(e.target.value)} rows={3} placeholder="Detalhes, sintomas ou pedidos específicos do cliente…" />
-          <div className="info-note"><i className="ti ti-info-circle" style={{ fontSize: 16 }} aria-hidden="true"></i><span>Após a recepção, o orçamento vai ao cliente para aprovação digital. Nada é executado sem aprovação.</span></div>
+          <label className="fl" style={{ marginTop: 18 }}>Notas adicionais (opcional)</label>
+          <textarea value={svcDesc} onChange={e => setSvcDesc(e.target.value)} rows={2} placeholder="Qualquer detalhe extra que ajude o diagnóstico…" />
+          <div className="info-note"><i className="ti ti-info-circle" style={{ fontSize: 16 }} aria-hidden="true"></i><span>Isto regista a intenção do cliente. Depois do diagnóstico, o orçamento vai ao cliente para aprovação. Nada é executado sem aprovação.</span></div>
           <div className="rec-nav">
             <button className="btn-ghost" onClick={() => setStep(1)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
             <button className="btn-primary" disabled={!canNext()} onClick={() => setStep(3)}>Próximo <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
@@ -580,11 +594,13 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
         </section>
       )}
 
-      {/* 6 — FOTOS */}
+      {/* 6 — FOTOS (6 zonas 360° + 3 do painel, todas obrigatórias) */}
       {step === 5 && (
         <section>
-          <h2>Fotos 360° <span className="req">— 6 obrigatórias</span></h2>
-          <p className="lead">Dá a volta ao carro. Cada foto guarda data, hora e GPS — prova do estado à entrada.</p>
+          <h2>Fotos obrigatórias <span className="req">— {REQ_TOTAL} no total</span></h2>
+          <p className="lead">Cada foto guarda data, hora e GPS — prova do estado à entrada. Não é possível avançar sem todas.</p>
+
+          <label className="fl">Volta ao carro — 360°</label>
           <div className="photo-grid">
             {REQ_ZONES.map(z => (
               <button key={z.key} className={`photo-slot ${photos[z.key] ? 'done' : ''}`} onClick={() => takePhoto(z.key)}>
@@ -593,15 +609,22 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
               </button>
             ))}
           </div>
-          <div className={`count-bar ${reqCount >= 6 ? 'ok' : 'bad'}`}>
-            <i className={`ti ${reqCount >= 6 ? 'ti-circle-check' : 'ti-alert-triangle'}`} aria-hidden="true"></i>
-            {reqCount} de 6 fotos {reqCount >= 6 ? '— completo' : `— faltam ${6 - reqCount}`}
+
+          <label className="fl" style={{ marginTop: 18 }}>Painel e conta-km</label>
+          <div className="dash-grid">
+            {DASH_ZONES.map(z => (
+              <button key={z.key} className={`photo-slot dash ${photos[z.key] ? 'done' : ''}`} onClick={() => takePhoto(z.key)}>
+                {photos[z.key] ? <img src={URL.createObjectURL(photos[z.key])} alt={z.label} /> : <span className="photo-icon"><i className="ti ti-camera" aria-hidden="true"></i></span>}
+                <span className="dash-label">{z.label}</span>
+                {!photos[z.key] && <span className="dash-hint">{z.hint}</span>}
+              </button>
+            ))}
           </div>
-          <label className="fl" style={{ marginTop: 16 }}>Foto do conta-km <span className="req">*</span></label>
-          <button className={`photo-slot km ${kmPhoto ? 'done' : ''}`} onClick={() => takePhoto('__km__')}>
-            {kmPhoto ? <img src={URL.createObjectURL(kmPhoto)} alt="km" /> : <span className="photo-icon"><i className="ti ti-camera" aria-hidden="true"></i></span>}
-            <span>Conta-km</span>
-          </button>
+
+          <div className={`count-bar ${totalReq >= REQ_TOTAL ? 'ok' : 'bad'}`}>
+            <i className={`ti ${totalReq >= REQ_TOTAL ? 'ti-circle-check' : 'ti-alert-triangle'}`} aria-hidden="true"></i>
+            {totalReq} de {REQ_TOTAL} fotos {totalReq >= REQ_TOTAL ? '— completo' : `— faltam ${REQ_TOTAL - totalReq}`}
+          </div>
           <div className="rec-nav">
             <button className="btn-ghost" onClick={() => setStep(4)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
             <button className="btn-primary" disabled={!canNext()} onClick={() => setStep(6)}>Próximo <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
