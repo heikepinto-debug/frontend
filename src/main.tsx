@@ -68,6 +68,7 @@ function Shell() {
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
   const [view, setView] = useState<'home' | 'reception' | 'list'>('home')
+  const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
 
   useEffect(() => {
     const on = () => setOnline(true), off = () => setOnline(false)
@@ -99,7 +100,7 @@ function Shell() {
         <main className="home">
           <h1>Olá, {user?.name?.split(' ')[0]}</h1>
           <div className="home-actions">
-            <button className="action-card" onClick={() => setView('reception')}>
+            <button className="action-card" onClick={() => { setResumeDraftId(undefined); setView('reception') }}>
               <div className="action-ic"><i className="ti ti-car" aria-hidden="true"></i></div>
               <span className="action-title">Nova recepção</span>
               <span className="action-sub">Cliente, viatura, fotos e assinatura</span>
@@ -112,8 +113,8 @@ function Shell() {
           </div>
         </main>
       )}
-      {view === 'reception' && <Reception onDone={() => setView('list')} onBack={() => setView('home')} />}
-      {view === 'list' && <ReceptionList onBack={() => setView('home')} />}
+      {view === 'reception' && <Reception key={resumeDraftId || 'new'} resumeDraftId={resumeDraftId} onDone={() => { setResumeDraftId(undefined); setView('list') }} onBack={() => { setResumeDraftId(undefined); setView('home') }} />}
+      {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} />}
     </div>
   )
 }
@@ -172,12 +173,15 @@ const V = {
 }
 
 
-function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void }) {
+function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBack: () => void; resumeDraftId?: string }) {
   const tenant = useSession(s => s.tenant)
   const [step, setStep] = useState(0)
   const [units, setUnits] = useState<any[]>([])
   const [terms, setTerms] = useState<any>(null)
   const [gps, setGps] = useState<{ lat: number; lng: number } | null>(null)
+  const [draftId, setDraftId] = useState<string | null>(resumeDraftId || null)
+  const [savingDraft, setSavingDraft] = useState(false)
+  const [bookingDate, setBookingDate] = useState('')     // marcação do cliente (opcional)
 
   const [custSearch, setCustSearch] = useState('')
   const [custResults, setCustResults] = useState<any[]>([])
@@ -214,7 +218,7 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
   const [tc, setTc] = useState([false, false, false])
   const [sigData, setSigData] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<{ number: string; offline: boolean; joId?: string } | null>(null)
+  const [result, setResult] = useState<{ number: string; offline: boolean; joId?: string; draft?: boolean } | null>(null)
 
   const fileRef = useRef<HTMLInputElement>(null)
   const pendingZone = useRef<string>('')
@@ -227,16 +231,50 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
       () => {}, { enableHighAccuracy: true, timeout: 8000 })
   }, [])
 
-  // Carrega o catálogo de todas as unidades — só para SUGESTÕES ao escrever
+  // Retomar rascunho: carrega e preenche os campos
   useEffect(() => {
-    if (units.length === 0) return
-    Promise.all(units.map(u => api(`/api/v1/services?unitId=${u.id}`).then(r => r.data).catch(() => [])))
-      .then(lists => {
-        const all = lists.flat()
-        const seen = new Set<string>()
-        setServices(all.filter((s: any) => { if (seen.has(s.name)) return false; seen.add(s.name); return true }))
-      })
-  }, [units])
+    if (!resumeDraftId) return
+    api(`/api/v1/receptions/${resumeDraftId}/draft`).then(({ data: d }) => {
+      setExistingCust({ id: d.customer_id, full_name: d.customer_name, phone: d.customer_phone })
+      setExistingVeh({ id: d.vehicle_id, plate: d.plate, brand: d.brand, model: d.model, year: d.year })
+      setKm(d.km_entry != null ? String(d.km_entry) : '')
+      setFuel(d.fuel_level ?? 2)
+      setValuables(d.declared_valuables || '')
+      setChecklist(typeof d.checklist === 'string' ? JSON.parse(d.checklist) : (d.checklist || {}))
+      const dz = typeof d.damage_zones === 'string' ? JSON.parse(d.damage_zones) : (d.damage_zones || [])
+      setDamages(dz.map((x: any) => ({ ...x, photo: null })))
+      const ints = typeof d.intentions === 'string' ? JSON.parse(d.intentions) : (d.intentions || [])
+      setIntentions(ints)
+      setSvcDesc(d.service_description || '')
+      if (d.booking_date) setBookingDate(String(d.booking_date).slice(0, 16))
+    }).catch(() => {})
+  }, [resumeDraftId])
+
+  // Guardar rascunho (precisa de cliente + viatura)
+  const canSaveDraft = (!!existingCust || (newCust && custName.trim().length >= 2 && V.phone(custPhone)))
+    && (!!existingVeh || V.plate(plate))
+  const saveDraft = async () => {
+    setSavingDraft(true)
+    const payload: any = {
+      draftId: draftId || undefined,
+      businessUnitId: unitId,
+      customer: existingCust ? { id: existingCust.id } : { fullName: custName, phone: custPhone, email: custEmail || undefined },
+      vehicle: existingVeh ? { id: existingVeh.id, plate: existingVeh.plate }
+        : { plate: plate.toUpperCase(), brand, model, year: vyear ? Number(vyear) : undefined },
+      kmEntry: km ? Number(km) : undefined, fuelLevel: fuel,
+      declaredValuables: valuables || undefined,
+      checklist, damageZones: damages.map(d => ({ id: d.id, area: d.area, note: d.note })),
+      intentions, serviceDescription: svcDesc || undefined,
+      bookingDate: bookingDate || undefined,
+    }
+    try {
+      const r = await api('/api/v1/receptions/draft', { method: 'POST', body: JSON.stringify(payload) })
+      setDraftId(r.id)
+      setResult({ number: r.number, offline: false, draft: true } as any)
+    } catch { alert('Não foi possível guardar o rascunho.') }
+    finally { setSavingDraft(false) }
+  }
+
 
   useEffect(() => {
     if (existingCust || newCust) return
@@ -303,6 +341,7 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
   const submit = async () => {
     setBusy(true)
     const payload: any = {
+      draftId: draftId || undefined,
       businessUnitId: unitId, source: 'walkin',
       customer: existingCust ? { id: existingCust.id }
         : { fullName: custName, phone: custPhone, email: custEmail || undefined },
@@ -313,6 +352,7 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
       checklist,
       damageZones: damages.map(d => ({ id: d.id, area: d.area, note: d.note })),
       intentions, serviceDescription: svcDesc || undefined,
+      bookingDate: bookingDate || undefined,
       termsVersion: terms?.version || '1.0',
       termsAcceptedAt: new Date().toISOString(),
     }
@@ -348,13 +388,15 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
   if (result) return (
     <main className="reception">
       <div className="success-box">
-        <div className="success-ic"><i className="ti ti-check" aria-hidden="true"></i></div>
+        <div className="success-ic"><i className={`ti ${result.draft ? 'ti-device-floppy' : 'ti-check'}`} aria-hidden="true"></i></div>
         <div className="success-number">{result.number}</div>
-        <p>{result.offline
+        <p>{result.draft
+          ? 'Rascunho guardado. Podes continuar este lançamento mais tarde a partir da lista de recepções.'
+          : result.offline
           ? 'Recepção guardada no tablet. Sincroniza automaticamente quando houver internet.'
           : 'Ordem de trabalho criada, fotos carregadas e documento assinado arquivado.'}</p>
         <div className="success-actions">
-          {!result.offline && result.joId && (
+          {!result.offline && !result.draft && result.joId && (
             <button className="btn-primary" style={{ justifyContent: 'center' }}
               onClick={async () => {
                 try { const r = await api(`/api/v1/receptions/${result.joId}/pdf`); if (r.url) window.open(r.url, '_blank') }
@@ -363,7 +405,7 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
               <i className="ti ti-printer" aria-hidden="true"></i> Imprimir documento
             </button>
           )}
-          <button className={result.offline ? 'btn-primary' : 'btn-ghost'} onClick={onDone} style={{ justifyContent: 'center' }}>Ver recepções</button>
+          <button className={(result.offline || result.draft) ? 'btn-primary' : 'btn-ghost'} onClick={onDone} style={{ justifyContent: 'center' }}>Ver recepções</button>
         </div>
       </div>
     </main>
@@ -378,7 +420,11 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
       <div className="rec-top">
         <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Sair</button>
         <span className="rec-stepname">{step + 1} de {steps.length} · {steps[step]}</span>
-        {gps ? <span className="gps-ok"><i className="ti ti-map-pin" aria-hidden="true"></i> GPS</span> : <span />}
+        {canSaveDraft
+          ? <button className="btn-ghost btn-sm" disabled={savingDraft} onClick={saveDraft} title="Guardar rascunho">
+              <i className={`ti ${savingDraft ? 'ti-loader' : 'ti-device-floppy'}`} aria-hidden="true"></i> Rascunho
+            </button>
+          : (gps ? <span className="gps-ok"><i className="ti ti-map-pin" aria-hidden="true"></i> GPS</span> : <span />)}
       </div>
       <div className="rec-progress">
         {steps.map((_, i) => <div key={i} className={`rp-seg ${i < step ? 'done' : i === step ? 'cur' : ''}`} />)}
@@ -545,7 +591,9 @@ function Reception({ onDone, onBack }: { onDone: () => void; onBack: () => void 
 
           <label className="fl" style={{ marginTop: 18 }}>Notas adicionais (opcional)</label>
           <textarea value={svcDesc} onChange={e => setSvcDesc(e.target.value)} rows={2} placeholder="Qualquer detalhe extra que ajude o diagnóstico…" />
-          <div className="info-note"><i className="ti ti-info-circle" style={{ fontSize: 16 }} aria-hidden="true"></i><span>Isto regista a intenção do cliente. Depois do diagnóstico, o orçamento vai ao cliente para aprovação. Nada é executado sem aprovação.</span></div>
+          <label className="fl" style={{ marginTop: 18 }}>Data de marcação do cliente (opcional)</label>
+          <input type="datetime-local" value={bookingDate} onChange={e => setBookingDate(e.target.value)} />
+          <p className="hint" style={{ marginTop: 6 }}>Quando o cliente marcou ou vai trazer o carro. Serve para lembretes futuros.</p>
           <div className="rec-nav">
             <button className="btn-ghost" onClick={() => setStep(1)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
             <button className="btn-primary" disabled={!canNext()} onClick={() => setStep(3)}>Próximo <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
@@ -831,6 +879,7 @@ function SignaturePad({ onChange }: { onChange: (dataUrl: string | null) => void
 
 // ── Lista de recepções ───────────────────────────────────────
 const STATUS_LABEL: Record<string, string> = {
+  draft: 'Rascunho',
   reception: 'Em recepção',
   awaiting_diagnosis: 'Aguarda diagnóstico',
   awaiting_quote: 'Aguarda orçamento',
@@ -843,8 +892,9 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: 'Cancelado',
 }
 
-function ReceptionList({ onBack }: { onBack: () => void }) {
+function ReceptionList({ onBack, onResume }: { onBack: () => void; onResume: (id: string) => void }) {
   const canDelete = useSession(s => s.can('jobdelete:any'))
+  const canStatus = useSession(s => s.can('jobdelete:any'))   // mudar estado: só dono, nesta fase
   const [rows, setRows] = useState<any[]>([])
   const [pdfBusy, setPdfBusy] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -879,6 +929,20 @@ function ReceptionList({ onBack }: { onBack: () => void }) {
     } catch { alert('Não foi possível apagar.') }
   }
 
+  const STATUS_FLOW = ['awaiting_diagnosis','awaiting_quote','quote_sent','approved','in_progress','quality_check','ready','delivered']
+  const changeStatus = async (jo: any) => {
+    const options = STATUS_FLOW.map((s, i) => `${i + 1}. ${STATUS_LABEL[s]}`).join('\n')
+    const pick = prompt(`Mudar estado de ${jo.number}\nActual: ${STATUS_LABEL[jo.status] || jo.status}\n\n${options}\n\nEscreve o número do novo estado:`)
+    if (!pick) return
+    const idx = Number(pick.trim()) - 1
+    if (idx < 0 || idx >= STATUS_FLOW.length) { alert('Número inválido.'); return }
+    const status = STATUS_FLOW[idx]
+    try {
+      await api(`/api/v1/receptions/${jo.id}/status`, { method: 'POST', body: JSON.stringify({ status }) })
+      setRows(rs => rs.map(r => r.id === jo.id ? { ...r, status } : r))
+    } catch { alert('Não foi possível mudar o estado.') }
+  }
+
   return (
     <main className="reception">
       <div className="rec-top" style={{ marginBottom: 16 }}>
@@ -894,27 +958,42 @@ function ReceptionList({ onBack }: { onBack: () => void }) {
       </div>
 
       <div className="list">
-        {rows.map(r => (
-          <div key={r.id} className="list-row">
-            <span className="jo-num">{r.number}</span>
-            <span className="plate">{r.plate}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="list-name">{r.customer_name}</div>
-              <div className="list-sub">{r.brand} {r.model} · {r.photo_count} fotos{r.signed_at ? ' · assinada' : ''}</div>
+        {rows.map(r => {
+          const isDraft = r.status === 'draft'
+          return (
+            <div key={r.id} className={`list-row ${isDraft ? 'is-draft' : ''}`}>
+              <span className="jo-num">{r.number}</span>
+              <span className="plate">{r.plate}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="list-name">{r.customer_name}</div>
+                <div className="list-sub">{r.brand} {r.model}{isDraft ? '' : ` · ${r.photo_count} fotos${r.signed_at ? ' · assinada' : ''}`}</div>
+              </div>
+              {isDraft
+                ? <span className="badge-draft"><i className="ti ti-device-floppy" aria-hidden="true"></i> Rascunho</span>
+                : <span className={`status s-${r.status}`}>{STATUS_LABEL[r.status] || r.status}</span>}
+              {isDraft && (
+                <button className="btn-primary btn-sm" onClick={() => onResume(r.id)} title="Continuar lançamento">
+                  Continuar <i className="ti ti-arrow-right" aria-hidden="true"></i>
+                </button>
+              )}
+              {!isDraft && r.signed_at && (
+                <button className="btn-ghost btn-sm" disabled={pdfBusy === r.id} onClick={() => exportPdf(r.id)} title="Exportar PDF de entrada">
+                  <i className={`ti ${pdfBusy === r.id ? 'ti-loader' : 'ti-file-type-pdf'}`} aria-hidden="true"></i>
+                </button>
+              )}
+              {!isDraft && canStatus && (
+                <button className="btn-ghost btn-sm" onClick={() => changeStatus(r)} title="Mudar estado">
+                  <i className="ti ti-adjustments" aria-hidden="true"></i>
+                </button>
+              )}
+              {canDelete && (
+                <button className="btn-ghost btn-sm danger" onClick={() => remove(r)} title="Apagar entrada">
+                  <i className="ti ti-trash" aria-hidden="true"></i>
+                </button>
+              )}
             </div>
-            <span className={`status s-${r.status}`}>{STATUS_LABEL[r.status] || r.status}</span>
-            {r.signed_at && (
-              <button className="btn-ghost btn-sm" disabled={pdfBusy === r.id} onClick={() => exportPdf(r.id)} title="Exportar PDF de entrada">
-                <i className={`ti ${pdfBusy === r.id ? 'ti-loader' : 'ti-file-type-pdf'}`} aria-hidden="true"></i>
-              </button>
-            )}
-            {canDelete && (
-              <button className="btn-ghost btn-sm danger" onClick={() => remove(r)} title="Apagar entrada">
-                <i className="ti ti-trash" aria-hidden="true"></i>
-              </button>
-            )}
-          </div>
-        ))}
+          )
+        })}
         {!loading && rows.length === 0 && <p className="empty">{search ? 'Nada encontrado para essa pesquisa.' : 'Ainda sem recepções.'}</p>}
       </div>
     </main>
