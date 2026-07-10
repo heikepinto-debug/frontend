@@ -312,3 +312,30 @@ textarea { resize: vertical; line-height: 1.55; }
 .photo-viewer { position: fixed; inset: 0; background: rgba(0,0,0,.9); display: flex; align-items: center; justify-content: center; z-index: 200; padding: 20px; }
 .photo-viewer img { max-width: 100%; max-height: 90vh; border-radius: 8px; }
 .photo-viewer-close { position: absolute; top: 20px; right: 20px; background: rgba(255,255,255,.15); border: none; color: #fff; width: 44px; height: 44px; border-radius: 50%; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+
+/* ── Verificação de sistemas (entrada) ────────────────────── */
+.sys-list { display: flex; flex-direction: column; gap: 6px; }
+.sys-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; background: var(--s2); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.sys-name { font-size: 14px; color: var(--ink); }
+.sys-opts { display: flex; gap: 5px; flex-shrink: 0; }
+.sys-opt { width: 36px; height: 32px; border: 1px solid var(--line-2); background: var(--s1); border-radius: 7px; color: var(--ink-3); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 15px; }
+.sys-opt.on.ok { background: #DCFCE7; border-color: #16A34A; color: #15803D; }
+.sys-opt.on.fail { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
+.sys-opt.on.untested { background: #F3F4F6; border-color: #9CA3AF; color: #6B7280; }
+@media (prefers-color-scheme: dark) {
+  .sys-opt.on.ok { background: rgba(22,163,74,.2); }
+  .sys-opt.on.untested { background: rgba(156,163,175,.2); }
+}
+
+/* ── Aviso remap/dyno ─────────────────────────────────────── */
+.remap-warning { margin-top: 16px; padding: 16px; background: #FFFBEB; border: 1px solid #F59E0B; border-left-width: 4px; border-radius: var(--radius-sm); }
+.remap-warning-head { font-weight: 700; color: #B45309; font-size: 14px; display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.remap-warning p { font-size: 13px; color: var(--ink-2); line-height: 1.5; margin-bottom: 10px; }
+.remap-warning .chk.tc { margin-top: 4px; }
+@media (prefers-color-scheme: dark) { .remap-warning { background: rgba(245,158,11,.1); } }
+
+/* ── Revisão: sistemas ────────────────────────────────────── */
+.review-sys { display: flex; flex-wrap: wrap; gap: 6px; }
+.review-sys-item { font-size: 12px; padding: 4px 9px; border-radius: 20px; background: var(--s2); border: 1px solid var(--line); color: var(--ink-2); }
+.review-sys-item.ok { background: #DCFCE7; border-color: #86EFAC; color: #15803D; }
+.review-sys-item.fail { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }

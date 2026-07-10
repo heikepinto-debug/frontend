@@ -139,13 +139,28 @@ const REQ_ZONES = [
   { key: 'left', label: 'Lado esq.' }, { key: 'right', label: 'Lado dir.' },
   { key: 'roof', label: 'Tecto' }, { key: 'interior', label: 'Interior' },
 ]
+// Rodas — obrigatórias, porcas em detalhe (prova contra reclamações).
+const WHEEL_ZONES = [
+  { key: 'wheel_fl', label: 'Roda frente esq.', hint: 'Porcas em detalhe' },
+  { key: 'wheel_fr', label: 'Roda frente dir.', hint: 'Porcas em detalhe' },
+  { key: 'wheel_rl', label: 'Roda trás esq.', hint: 'Porcas em detalhe' },
+  { key: 'wheel_rr', label: 'Roda trás dir.', hint: 'Porcas em detalhe' },
+]
+// Bateria — obrigatória, com a referência registada.
+const BATTERY_ZONE = { key: 'battery', label: 'Bateria', hint: 'Mostra a marca/referência' }
 // Fotos do painel — obrigatórias. Documentam o estado eléctrico à entrada.
 const DASH_ZONES = [
   { key: 'dash_ign', label: 'Painel: ignição ON, motor OFF', hint: 'Mostra as luzes de aviso acesas' },
   { key: 'dash_run', label: 'Painel: motor ON', hint: 'O que fica aceso a trabalhar' },
   { key: 'km', label: 'Conta-km em foco', hint: 'Leitura clara dos quilómetros' },
 ]
-const REQ_TOTAL = REQ_ZONES.length + DASH_ZONES.length   // 9 fotos obrigatórias
+const REQ_TOTAL = REQ_ZONES.length + WHEEL_ZONES.length + 1 + DASH_ZONES.length   // 14 fotos obrigatórias
+
+// Sistemas verificados à entrada (estado como chegou)
+const SYSTEM_CHECKS = [
+  'Ar condicionado', 'Aquecimento', 'Piscas', 'Médios / Máximos', 'Luzes de travão',
+  'Buzina', 'Vidros eléctricos', 'Som / Rádio', 'Limpa-vidros', 'Fechos / Alarme',
+]
 const CHECKLIST = ['Livrete / documentos','Chaves entregues','Triângulo + colete',
   'Pneu suplente + macaco','Rádio com código','Tapetes originais']
 
@@ -221,6 +236,11 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   const [km, setKm] = useState(''); const [fuel, setFuel] = useState(2)
   const [checklist, setChecklist] = useState<Record<string, boolean>>({})
   const [valuables, setValuables] = useState('')
+  const [batteryRef, setBatteryRef] = useState('')                           // referência da bateria
+  const [systemsCheck, setSystemsCheck] = useState<Record<string, string>>({})  // sistema → ok/fail/untested
+  const [wantsOldParts, setWantsOldParts] = useState<boolean | null>(null)   // quer as peças antigas
+  const [showDiagNotice, setShowDiagNotice] = useState(false)                // pop-up do dever de diagnóstico
+  const [remapAccepted, setRemapAccepted] = useState(false)                  // cliente aceitou o aviso de remap/dyno
 
   const [damages, setDamages] = useState<Damage[]>([])
   const [dmgGroup, setDmgGroup] = useState(0)
@@ -241,6 +261,10 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   useEffect(() => {
     api('/api/v1/business-units').then(r => { setUnits(r.data); if (r.data[0]) setUnitId(r.data[0].id) }).catch(() => {})
     api('/api/v1/terms/active').then(setTerms).catch(() => {})
+    // Pop-up do dever de diagnóstico (se ligado) — só numa entrada nova, não ao retomar rascunho
+    if (!resumeDraftId) {
+      api('/api/v1/reception-config').then(r => { if (r.diagnosisNoticeOn) setShowDiagNotice(true) }).catch(() => {})
+    }
     navigator.geolocation?.getCurrentPosition(
       p => setGps({ lat: p.coords.latitude, lng: p.coords.longitude }),
       () => {}, { enableHighAccuracy: true, timeout: 8000 })
@@ -256,6 +280,9 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       setFuel(d.fuel_level ?? 2)
       setValuables(d.declared_valuables || '')
       setChecklist(typeof d.checklist === 'string' ? JSON.parse(d.checklist) : (d.checklist || {}))
+      setBatteryRef(d.battery_reference || '')
+      setSystemsCheck(typeof d.systems_check === 'string' ? JSON.parse(d.systems_check) : (d.systems_check || {}))
+      if (d.wants_old_parts != null) setWantsOldParts(d.wants_old_parts)
       const dz = typeof d.damage_zones === 'string' ? JSON.parse(d.damage_zones) : (d.damage_zones || [])
       setDamages(dz.map((x: any) => ({ ...x, photo: null })))
       const ints = typeof d.intentions === 'string' ? JSON.parse(d.intentions) : (d.intentions || [])
@@ -279,6 +306,8 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       kmEntry: km ? Number(km) : undefined, fuelLevel: fuel,
       declaredValuables: valuables || undefined,
       checklist, damageZones: damages.map(d => ({ id: d.id, area: d.area, note: d.note })),
+      batteryReference: batteryRef || undefined, systemsCheck,
+      wantsOldParts: wantsOldParts ?? undefined,
       intentions, serviceDescription: svcDesc || undefined,
       bookingDate: bookingDate || undefined,
     }
@@ -336,19 +365,23 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
     setDamages(ds => ds.map(d => d.id === id ? { ...d, note } : d))
 
   const reqCount = REQ_ZONES.filter(z => photos[z.key]).length
+  const wheelCount = WHEEL_ZONES.filter(z => photos[z.key]).length
+  const batteryCount = photos[BATTERY_ZONE.key] ? 1 : 0
   const dashCount = DASH_ZONES.filter(z => photos[z.key]).length
-  const totalReq = reqCount + dashCount
+  const totalReq = reqCount + wheelCount + batteryCount + dashCount
   const allTc = tc.every(Boolean)
+  // Detecta se o serviço envolve remap ou dyno (para o aviso específico)
+  const isRemapDyno = intentions.some(i => /remap|reprogram|dyno|tune|tuning|stage|potência|potencia|mapa/i.test(i))
 
   const canNext = (): boolean => {
     switch (step) {
-      case 0: return !!existingCust || (newCust && custName.trim().length >= 2 && V.phone(custPhone) && V.email(custEmail) && !!idDoc)
+      case 0: return !!existingCust || (newCust && custName.trim().length >= 2 && V.phone(custPhone) && V.email(custEmail))
       case 1: return !!existingVeh || (V.plate(plate) && V.year(vyear))
       case 2: return intentions.length >= 1
       case 3: return valuables.trim().length > 0 && V.km(km)
       case 4: return true                       // danos são opcionais
-      case 5: return totalReq >= REQ_TOTAL       // 6 zonas + 3 painel, todas obrigatórias
-      case 6: return allTc && !!sigData
+      case 5: return totalReq >= REQ_TOTAL && batteryRef.trim().length > 0  // fotos + referência da bateria
+      case 6: return allTc && !!sigData && (!!existingCust || !!idDoc) && (!isRemapDyno || remapAccepted)  // BI + aviso remap
       default: return true
     }
   }
@@ -366,12 +399,14 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       declaredValuables: valuables || 'Nenhum objecto declarado',
       checklist,
       damageZones: damages.map(d => ({ id: d.id, area: d.area, note: d.note })),
+      batteryReference: batteryRef || undefined, systemsCheck,
+      wantsOldParts: wantsOldParts ?? undefined,
       intentions, serviceDescription: svcDesc || undefined,
       bookingDate: bookingDate || undefined,
       termsVersion: terms?.version || '1.0',
       termsAcceptedAt: new Date().toISOString(),
     }
-    const allReq = [...REQ_ZONES, ...DASH_ZONES]   // 9 fotos obrigatórias
+    const allReq = [...REQ_ZONES, ...WHEEL_ZONES, BATTERY_ZONE, ...DASH_ZONES]   // 14 fotos obrigatórias
     try {
       if (!navigator.onLine) throw new Error('OFFLINE')
       const jo = await api('/api/v1/receptions', { method: 'POST', body: JSON.stringify(payload) })
@@ -431,6 +466,18 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   return (
     <main className="reception">
       <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={onFile} />
+
+      {showDiagNotice && (
+        <div className="notice-overlay">
+          <div className="notice-card">
+            <div className="notice-ic"><i className="ti ti-stethoscope" aria-hidden="true"></i></div>
+            <h2>Antes de começar</h2>
+            <p>A nossa responsabilidade não termina na queixa do cliente. Verifica o básico e observa o carro com atenção — se notares falhas, ruídos ou comportamentos estranhos, regista-os. O cliente decide se quer ver, mas é nosso dever reportar.</p>
+            <p><strong>O diagnóstico electrónico é obrigatório em todos os casos</strong>, com evidências fotográficas. É da tua responsabilidade.</p>
+            <button className="btn-primary" style={{ justifyContent: 'center' }} onClick={() => setShowDiagNotice(false)}>Entendido, vou verificar</button>
+          </div>
+        </div>
+      )}
 
       <div className="rec-top">
         <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Sair</button>
@@ -502,13 +549,6 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
               <div style={{ marginTop: 14 }}><label className="fl">Email (opcional)</label>
                 <input type="email" value={custEmail} onChange={e => setCustEmail(e.target.value)} placeholder="email@exemplo.com" />
                 {!V.email(custEmail) && <div className="field-warn">Email com formato inválido.</div>}</div>
-
-              <label className="fl" style={{ marginTop: 16 }}>Documento de identificação <span className="req">*</span></label>
-              <p className="hint" style={{ marginTop: 0, marginBottom: 8 }}>Foto do BI, passaporte ou carta — confirma a identidade de quem assina.</p>
-              <button className={`photo-slot km ${idDoc ? 'done' : ''}`} onClick={() => takePhoto('__iddoc__')}>
-                {idDoc ? <img src={URL.createObjectURL(idDoc)} alt="documento" /> : <span className="photo-icon"><i className="ti ti-id" aria-hidden="true"></i></span>}
-                <span>Documento</span>
-              </button>
             </>
           )}
           <div className="rec-nav"><span />
@@ -640,6 +680,32 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
           <label className="fl" style={{ marginTop: 18 }}>Objectos declarados pelo cliente <span className="req">*</span></label>
           <textarea value={valuables} onChange={e => setValuables(e.target.value)} placeholder="Objectos deixados na viatura…" rows={2} />
           <button className="btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => setValuables('Nenhum objecto de valor declarado pelo cliente.')}>Nenhum objecto</button>
+
+          <label className="fl" style={{ marginTop: 22 }}>Verificação de sistemas à entrada</label>
+          <p className="hint" style={{ marginTop: 0, marginBottom: 10 }}>Regista como o carro chegou — protege-te de reclamações sobre coisas que já vinham avariadas.</p>
+          <div className="sys-list">
+            {SYSTEM_CHECKS.map(s => (
+              <div key={s} className="sys-row">
+                <span className="sys-name">{s}</span>
+                <div className="sys-opts">
+                  {[['ok', 'OK', 'ti-check'], ['fail', 'Falha', 'ti-x'], ['untested', 'N/T', 'ti-minus']].map(([val, lbl, ic]) => (
+                    <button key={val} className={`sys-opt ${systemsCheck[s] === val ? `on ${val}` : ''}`}
+                      onClick={() => setSystemsCheck(p => ({ ...p, [s]: val }))} title={lbl}>
+                      <i className={`ti ${ic}`} aria-hidden="true"></i>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <label className="fl" style={{ marginTop: 22 }}>Peças antigas</label>
+          <p className="hint" style={{ marginTop: 0, marginBottom: 10 }}>O cliente quer ficar com as peças que forem substituídas?</p>
+          <div className="seg">
+            <button className={wantsOldParts === true ? 'on' : ''} onClick={() => setWantsOldParts(true)}>Sim, quer as peças</button>
+            <button className={wantsOldParts === false ? 'on' : ''} onClick={() => setWantsOldParts(false)}>Não quer</button>
+          </div>
+
           <div className="rec-nav">
             <button className="btn-ghost" onClick={() => setStep(2)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
             <button className="btn-primary" disabled={!canNext()} onClick={() => setStep(4)}>Próximo <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
@@ -714,6 +780,29 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
             ))}
           </div>
 
+          <label className="fl" style={{ marginTop: 18 }}>Rodas — porcas em detalhe</label>
+          <div className="photo-grid">
+            {WHEEL_ZONES.map(z => (
+              <button key={z.key} className={`photo-slot ${photos[z.key] ? 'done' : ''}`} onClick={() => takePhoto(z.key)}>
+                {photos[z.key] ? <img src={URL.createObjectURL(photos[z.key])} alt={z.label} /> : <span className="photo-icon"><i className="ti ti-camera" aria-hidden="true"></i></span>}
+                <span>{z.label}</span>
+              </button>
+            ))}
+          </div>
+
+          <label className="fl" style={{ marginTop: 18 }}>Bateria</label>
+          <div className="grid2" style={{ alignItems: 'start' }}>
+            <button className={`photo-slot ${photos[BATTERY_ZONE.key] ? 'done' : ''}`} onClick={() => takePhoto(BATTERY_ZONE.key)}>
+              {photos[BATTERY_ZONE.key] ? <img src={URL.createObjectURL(photos[BATTERY_ZONE.key])} alt="bateria" /> : <span className="photo-icon"><i className="ti ti-battery" aria-hidden="true"></i></span>}
+              <span>{BATTERY_ZONE.label}</span>
+            </button>
+            <div>
+              <label className="fl">Referência / marca <span className="req">*</span></label>
+              <input value={batteryRef} onChange={e => setBatteryRef(e.target.value)} placeholder="ex: Bosch S4 60Ah" />
+              <p className="hint" style={{ marginTop: 6 }}>Protege contra troca de bateria.</p>
+            </div>
+          </div>
+
           <label className="fl" style={{ marginTop: 18 }}>Painel e conta-km</label>
           <div className="dash-grid">
             {DASH_ZONES.map(z => (
@@ -768,6 +857,8 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
             <div className="review-row"><span>Quilometragem</span><strong>{km ? `${MZmt(Number(km))} km` : '—'}</strong></div>
             <div className="review-row"><span>Combustível</span><strong>{Math.round(fuel / 8 * 100)}%</strong></div>
             <div className="review-row"><span>Objectos declarados</span><strong>{valuables}</strong></div>
+            {batteryRef && <div className="review-row"><span>Bateria</span><strong>{batteryRef}</strong></div>}
+            {wantsOldParts != null && <div className="review-row"><span>Peças antigas</span><strong>{wantsOldParts ? 'Quero ficar com elas' : 'Não quero'}</strong></div>}
           </div>
 
           <div className="review-block">
@@ -776,6 +867,17 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
               {intentions.map(it => <span key={it} className="review-chip">{it}</span>)}
             </div>
           </div>
+
+          {Object.keys(systemsCheck).length > 0 && (
+            <div className="review-block">
+              <div className="review-block-title">Verificação de sistemas à entrada</div>
+              <div className="review-sys">
+                {Object.entries(systemsCheck).map(([k, v]) => (
+                  <span key={k} className={`review-sys-item ${v}`}>{k}: {v === 'ok' ? 'OK' : v === 'fail' ? 'Falha' : 'N/T'}</span>
+                ))}
+              </div>
+            </div>
+          )}
 
           {damages.length > 0 && (
             <div className="review-block">
@@ -790,9 +892,9 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
           )}
 
           <div className="review-block">
-            <div className="review-block-title">Fotos tiradas ({[...REQ_ZONES, ...DASH_ZONES].filter(z => photos[z.key]).length})</div>
+            <div className="review-block-title">Fotos tiradas ({[...REQ_ZONES, ...WHEEL_ZONES, BATTERY_ZONE, ...DASH_ZONES].filter(z => photos[z.key]).length})</div>
             <div className="review-photos">
-              {[...REQ_ZONES, ...DASH_ZONES].map(z => photos[z.key] && (
+              {[...REQ_ZONES, ...WHEEL_ZONES, BATTERY_ZONE, ...DASH_ZONES].map(z => photos[z.key] && (
                 <div key={z.key} className="review-photo">
                   <img src={URL.createObjectURL(photos[z.key])} alt={z.label} />
                 </div>
@@ -821,6 +923,29 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
               <span className="chk-box">{tc[i] && <i className="ti ti-check" aria-hidden="true"></i>}</span>{label}
             </button>
           ))}
+
+          {isRemapDyno && (
+            <div className="remap-warning">
+              <div className="remap-warning-head"><i className="ti ti-alert-triangle" aria-hidden="true"></i> Aviso importante — Reprogramação / Dyno</div>
+              <p>A oficina responde pela correcta execução do serviço de reprogramação. Não é prestada garantia sobre componentes mecânicos do veículo (motor, caixa, embraiagem, turbo, entre outros), que não são objecto deste serviço e cujo estado interno e desgaste preexistente não são determináveis por diagnóstico.</p>
+              <p>A reprogramação aumenta a solicitação mecânica e pode expor fragilidades já existentes. Esta é a prática corrente no sector de tuning a nível internacional.</p>
+              <button className={`chk tc ${remapAccepted ? 'on' : ''}`} onClick={() => setRemapAccepted(v => !v)}>
+                <span className="chk-box">{remapAccepted && <i className="ti ti-check" aria-hidden="true"></i>}</span>
+                Li e aceito este aviso, e autorizo o serviço de reprogramação nestas condições.
+              </button>
+            </div>
+          )}
+
+          {newCust && !existingCust && (
+            <>
+              <label className="fl" style={{ marginTop: 14 }}>Documento de identificação <span className="req">*</span></label>
+              <p className="hint" style={{ marginTop: 0, marginBottom: 8 }}>Foto do BI, passaporte ou carta do cliente — confirma a identidade de quem assina.</p>
+              <button className={`photo-slot km ${idDoc ? 'done' : ''}`} onClick={() => takePhoto('__iddoc__')}>
+                {idDoc ? <img src={URL.createObjectURL(idDoc)} alt="documento" /> : <span className="photo-icon"><i className="ti ti-id" aria-hidden="true"></i></span>}
+                <span>Documento</span>
+              </button>
+            </>
+          )}
           <label className="fl" style={{ marginTop: 14 }}>Assinatura do cliente <span className="req">*</span></label>
           <SignaturePad onChange={setSigData} />
           <div className="rec-nav">
