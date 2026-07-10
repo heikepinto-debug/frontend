@@ -39,7 +39,14 @@ function Login() {
     <div className="login-page">
       <div className="login-card">
         <div className="gh-logo">
-          <div className="gh-mark"><i className="ti ti-e-passport" style={{ fontSize: 22 }} aria-hidden="true"></i></div>
+          <div className="gh-mark">
+            <svg width="30" height="30" viewBox="0 0 88 88" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <circle cx="44" cy="44" r="40" fill="none" stroke="#fff" strokeWidth="9"/>
+              <line x1="30" y1="30" x2="30" y2="58" stroke="#fff" strokeWidth="9" strokeLinecap="round"/>
+              <line x1="58" y1="30" x2="58" y2="58" stroke="#fff" strokeWidth="9" strokeLinecap="round"/>
+              <line x1="30" y1="44" x2="58" y2="44" stroke="#fff" strokeWidth="9" strokeLinecap="round"/>
+            </svg>
+          </div>
           <div>
             <div className="gh-name">OficinaHub</div>
             <div className="gh-sub">Gestão de oficinas</div>
@@ -67,8 +74,9 @@ function Shell() {
   const { tenant, user, logout } = useSession()
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
-  const [view, setView] = useState<'home' | 'reception' | 'list'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
+  const [detailId, setDetailId] = useState<string | undefined>(undefined)
 
   useEffect(() => {
     const on = () => setOnline(true), off = () => setOnline(false)
@@ -110,11 +118,18 @@ function Shell() {
               <span className="action-title">Recepções</span>
               <span className="action-sub">Ver ordens de trabalho criadas</span>
             </button>
+            <button className="action-card" onClick={() => setView('tasks')}>
+              <div className="action-ic"><i className="ti ti-checklist" aria-hidden="true"></i></div>
+              <span className="action-title">Tarefas</span>
+              <span className="action-sub">As minhas tarefas e as que atribuí</span>
+            </button>
           </div>
         </main>
       )}
       {view === 'reception' && <Reception key={resumeDraftId || 'new'} resumeDraftId={resumeDraftId} onDone={() => { setResumeDraftId(undefined); setView('list') }} onBack={() => { setResumeDraftId(undefined); setView('home') }} />}
-      {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} />}
+      {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} />}
+      {view === 'detail' && detailId && <ReceptionDetail joId={detailId} onBack={() => setView('list')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} />}
+      {view === 'tasks' && <Tasks onBack={() => setView('home')} />}
     </div>
   )
 }
@@ -892,7 +907,7 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: 'Cancelado',
 }
 
-function ReceptionList({ onBack, onResume }: { onBack: () => void; onResume: (id: string) => void }) {
+function ReceptionList({ onBack, onResume, onOpen }: { onBack: () => void; onResume: (id: string) => void; onOpen: (id: string) => void }) {
   const canDelete = useSession(s => s.can('jobdelete:any'))
   const canStatus = useSession(s => s.can('jobdelete:any'))   // mudar estado: só dono, nesta fase
   const [rows, setRows] = useState<any[]>([])
@@ -961,10 +976,10 @@ function ReceptionList({ onBack, onResume }: { onBack: () => void; onResume: (id
         {rows.map(r => {
           const isDraft = r.status === 'draft'
           return (
-            <div key={r.id} className={`list-row ${isDraft ? 'is-draft' : ''}`}>
-              <span className="jo-num">{r.number}</span>
-              <span className="plate">{r.plate}</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
+            <div key={r.id} className={`list-row clickable ${isDraft ? 'is-draft' : ''}`}>
+              <span className="jo-num" onClick={() => onOpen(r.id)}>{r.number}</span>
+              <span className="plate" onClick={() => onOpen(r.id)}>{r.plate}</span>
+              <div style={{ flex: 1, minWidth: 0 }} onClick={() => onOpen(r.id)}>
                 <div className="list-name">{r.customer_name}</div>
                 <div className="list-sub">{r.brand} {r.model}{isDraft ? '' : ` · ${r.photo_count} fotos${r.signed_at ? ' · assinada' : ''}`}</div>
               </div>
@@ -995,6 +1010,308 @@ function ReceptionList({ onBack, onResume }: { onBack: () => void; onResume: (id
           )
         })}
         {!loading && rows.length === 0 && <p className="empty">{search ? 'Nada encontrado para essa pesquisa.' : 'Ainda sem recepções.'}</p>}
+      </div>
+    </main>
+  )
+}
+
+// ── DETALHE DA RECEPÇÃO (ver informação registada) ───────────
+function ReceptionDetail({ joId, onBack, onResume }: { joId: string; onBack: () => void; onResume: (id: string) => void }) {
+  const [jo, setJo] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [photo, setPhoto] = useState<string | null>(null)  // foto ampliada
+
+  useEffect(() => {
+    api(`/api/v1/receptions/${joId}`).then(setJo).catch(() => {}).finally(() => setLoading(false))
+  }, [joId])
+
+  if (loading) return <main className="reception"><p className="empty">A carregar…</p></main>
+  if (!jo) return <main className="reception"><p className="empty">Não foi possível carregar.</p></main>
+
+  const isDraft = jo.status === 'draft'
+  const asArr = (v: any) => typeof v === 'string' ? (() => { try { return JSON.parse(v) } catch { return [] } })() : (v || [])
+  const asObj = (v: any) => typeof v === 'string' ? (() => { try { return JSON.parse(v) } catch { return {} } })() : (v || {})
+  const intentions: string[] = asArr(jo.intentions)
+  const damages: any[] = asArr(jo.damage_zones)
+  const checklist = asObj(jo.checklist)
+  const items = Object.keys(checklist).filter(k => checklist[k])
+  const fmt = (s?: string) => s ? new Date(s).toLocaleString('pt-PT') : '—'
+  const fuel = jo.fuel_level != null ? `${Math.round(jo.fuel_level / 8 * 100)}%` : '—'
+
+  const Row = ({ label, value }: { label: string; value: any }) => (
+    <div className="det-row"><span>{label}</span><strong>{value || '—'}</strong></div>
+  )
+
+  return (
+    <main className="reception">
+      {photo && (
+        <div className="photo-viewer" onClick={() => setPhoto(null)}>
+          <img src={photo} alt="foto" />
+          <button className="photo-viewer-close"><i className="ti ti-x" aria-hidden="true"></i></button>
+        </div>
+      )}
+
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Recepções</button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>{jo.number}</h2>
+        {isDraft
+          ? <button className="btn-primary btn-sm" onClick={() => onResume(joId)}>Continuar <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
+          : <span />}
+      </div>
+
+      {isDraft && <div className="det-banner"><i className="ti ti-device-floppy" aria-hidden="true"></i> Rascunho — lançamento por concluir</div>}
+
+      <div className="det-section">
+        <div className="det-section-title">Estado</div>
+        <Row label="Situação" value={STATUS_LABEL[jo.status] || jo.status} />
+        {jo.booking_date && <Row label="Marcação" value={fmt(jo.booking_date)} />}
+        {jo.received_at && !isDraft && <Row label="Entrada" value={fmt(jo.received_at)} />}
+        {jo.received_by_name && <Row label="Finalizada por" value={jo.received_by_name} />}
+        {jo.draft_created_by_name && jo.draft_created_by_name !== jo.received_by_name && (
+          <Row label="Iniciada por" value={jo.draft_created_by_name} />
+        )}
+      </div>
+
+      <div className="det-section">
+        <div className="det-section-title">Cliente</div>
+        <Row label="Nome" value={jo.customer_name} />
+        <Row label="Contacto" value={jo.customer_phone} />
+      </div>
+
+      <div className="det-section">
+        <div className="det-section-title">Viatura</div>
+        <Row label="Marca / Modelo" value={`${jo.brand || ''} ${jo.model || ''}`.trim()} />
+        <Row label="Matrícula" value={jo.plate} />
+        {jo.year && <Row label="Ano" value={jo.year} />}
+        {jo.color && <Row label="Cor" value={jo.color} />}
+        <Row label="Quilometragem" value={jo.km_entry != null ? `${MZmt(jo.km_entry)} km` : '—'} />
+        <Row label="Combustível" value={fuel} />
+      </div>
+
+      <div className="det-section">
+        <div className="det-section-title">Intenção do cliente</div>
+        {intentions.length
+          ? <div className="det-chips">{intentions.map((it, i) => <span key={i} className="review-chip">{it}</span>)}</div>
+          : <p className="det-empty">—</p>}
+        {jo.service_description && <p className="det-notes">{jo.service_description}</p>}
+      </div>
+
+      <div className="det-section">
+        <div className="det-section-title">Estado e itens declarados</div>
+        <Row label="Itens presentes" value={items.length ? items.join(', ') : 'Nenhum'} />
+        <Row label="Objectos declarados" value={jo.declared_valuables} />
+      </div>
+
+      {damages.length > 0 && (
+        <div className="det-section">
+          <div className="det-section-title">Danos registados</div>
+          {damages.map((d, i) => (
+            <div key={i} className="review-damage">
+              <span className="review-damage-n">{i + 1}</span>
+              <span>{d.area}{d.note ? ` — ${d.note}` : ''}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {jo.photos && jo.photos.length > 0 && (
+        <div className="det-section">
+          <div className="det-section-title">Fotos ({jo.photos.length})</div>
+          <div className="review-photos">
+            {jo.photos.map((p: any) => p.url && (
+              <div key={p.id} className="review-photo" onClick={() => setPhoto(p.url)}>
+                <img src={p.url} alt={p.zone} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {jo.signatureViewUrl && (
+        <div className="det-section">
+          <div className="det-section-title">Assinatura do cliente</div>
+          <img src={jo.signatureViewUrl} alt="assinatura" className="det-signature" />
+          {jo.terms_version && <p className="det-notes">Termos v{jo.terms_version} · aceites em {fmt(jo.terms_accepted_at)}</p>}
+        </div>
+      )}
+
+      {!isDraft && jo.signed_at && (
+        <button className="btn-ghost" style={{ width: '100%', justifyContent: 'center', marginTop: 8 }}
+          onClick={async () => { try { const r = await api(`/api/v1/receptions/${joId}/pdf`); if (r.url) window.open(r.url, '_blank') } catch { alert('Não foi possível abrir o PDF.') } }}>
+          <i className="ti ti-file-type-pdf" aria-hidden="true"></i> Ver documento de entrada (PDF)
+        </button>
+      )}
+    </main>
+  )
+}
+
+// ── TAREFAS (to-do list hierárquica) ─────────────────────────
+function Tasks({ onBack }: { onBack: () => void }) {
+  const [mine, setMine] = useState<any[]>([])
+  const [assigned, setAssigned] = useState<any[]>([])
+  const [assignable, setAssignable] = useState<any[]>([])
+  const [tab, setTab] = useState<'mine' | 'assigned'>('mine')
+  const [showNew, setShowNew] = useState(false)
+  const [showNotice, setShowNotice] = useState(false)
+
+  // formulário nova tarefa
+  const [title, setTitle] = useState('')
+  const [desc, setDesc] = useState('')
+  const [assignTo, setAssignTo] = useState('')
+  const [due, setDue] = useState('')
+  const [priority, setPriority] = useState<'normal' | 'high'>('normal')
+  const [busy, setBusy] = useState(false)
+
+  const load = () => {
+    api('/api/v1/tasks').then(r => { setMine(r.mine); setAssigned(r.assigned) }).catch(() => {})
+    api('/api/v1/tasks/assignable').then(r => setAssignable(r.data)).catch(() => {})
+  }
+  useEffect(() => {
+    load()
+    // aviso de desempenho — só a 1ª vez
+    api('/api/v1/tasks/perf-notice').then(r => { if (!r.seen) setShowNotice(true) }).catch(() => {})
+  }, [])
+
+  const dismissNotice = async () => {
+    setShowNotice(false)
+    try { await api('/api/v1/tasks/perf-notice/seen', { method: 'POST' }) } catch {}
+  }
+
+  const create = async () => {
+    if (title.trim().length < 2 || !assignTo) return
+    setBusy(true)
+    try {
+      await api('/api/v1/tasks', { method: 'POST', body: JSON.stringify({
+        title, description: desc || undefined, assignedTo: assignTo,
+        dueDate: due || undefined, priority,
+      }) })
+      setTitle(''); setDesc(''); setAssignTo(''); setDue(''); setPriority('normal'); setShowNew(false)
+      load()
+    } catch (e: any) { alert(e?.message || 'Não foi possível criar a tarefa.') }
+    finally { setBusy(false) }
+  }
+
+  const setStatus = async (t: any, status: string) => {
+    try {
+      await api(`/api/v1/tasks/${t.id}/status`, { method: 'POST', body: JSON.stringify({ status }) })
+      load()
+    } catch { alert('Não foi possível actualizar.') }
+  }
+  const removeTask = async (t: any) => {
+    if (!confirm(`Apagar a tarefa "${t.title}"?`)) return
+    try { await api(`/api/v1/tasks/${t.id}`, { method: 'DELETE' }); load() } catch { alert('Não foi possível apagar.') }
+  }
+
+  // classificação de urgência para as MINHAS tarefas
+  const urgency = (t: any): 'overdue' | 'soon' | 'none' => {
+    if (t.status === 'done' || !t.due_date) return 'none'
+    const now = Date.now(), d = new Date(t.due_date).getTime()
+    if (d < now) return 'overdue'
+    if (d - now < 48 * 3600 * 1000) return 'soon'
+    return 'none'
+  }
+  const fmtDate = (s?: string) => s ? new Date(s).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''
+
+  // ordena: atrasadas primeiro, depois a expirar, depois normais, feitas no fim
+  const sortedMine = [...mine].sort((a, b) => {
+    const rank = (t: any) => t.status === 'done' ? 3 : urgency(t) === 'overdue' ? 0 : urgency(t) === 'soon' ? 1 : 2
+    return rank(a) - rank(b)
+  })
+
+  const list = tab === 'mine' ? sortedMine : assigned
+  const STATUS_NEXT: Record<string, { label: string; to: string; icon: string }> = {
+    pending: { label: 'Começar', to: 'in_progress', icon: 'ti-player-play' },
+    in_progress: { label: 'Concluir', to: 'done', icon: 'ti-check' },
+  }
+
+  return (
+    <main className="reception">
+      {showNotice && (
+        <div className="notice-overlay">
+          <div className="notice-card">
+            <div className="notice-ic"><i className="ti ti-target-arrow" aria-hidden="true"></i></div>
+            <h2>As tuas tarefas contam</h2>
+            <p>Aqui vês o que te foi atribuído e os prazos. O teu desempenho — tarefas concluídas e prazos cumpridos — é acompanhado e faz parte da tua avaliação.</p>
+            <p>É também a base para reconhecer o bom trabalho, em progressões e bónus. Contamos contigo.</p>
+            <button className="btn-primary" style={{ justifyContent: 'center' }} onClick={dismissNotice}>Entendi</button>
+          </div>
+        </div>
+      )}
+
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
+        <h2 style={{ margin: 0, fontSize: 20 }}>Tarefas</h2>
+        {assignable.length > 0
+          ? <button className="btn-primary btn-sm" onClick={() => setShowNew(true)}><i className="ti ti-plus" aria-hidden="true"></i> Nova</button>
+          : <span />}
+      </div>
+
+      <div className="task-tabs">
+        <button className={tab === 'mine' ? 'on' : ''} onClick={() => setTab('mine')}>As minhas ({mine.filter(t => t.status !== 'done').length})</button>
+        {assignable.length > 0 && <button className={tab === 'assigned' ? 'on' : ''} onClick={() => setTab('assigned')}>Que atribuí ({assigned.filter(t => t.status !== 'done').length})</button>}
+      </div>
+
+      {showNew && (
+        <div className="task-form">
+          <label className="fl">Tarefa <span className="req">*</span></label>
+          <input value={title} onChange={e => setTitle(e.target.value)} placeholder="O que precisa de ser feito" />
+          <label className="fl" style={{ marginTop: 12 }}>Detalhes (opcional)</label>
+          <textarea value={desc} onChange={e => setDesc(e.target.value)} rows={2} placeholder="Notas ou contexto" />
+          <label className="fl" style={{ marginTop: 12 }}>Responsável <span className="req">*</span></label>
+          <select value={assignTo} onChange={e => setAssignTo(e.target.value)}>
+            <option value="">Escolher…</option>
+            {assignable.map(u => <option key={u.id} value={u.id}>{u.full_name} — {u.role_name}</option>)}
+          </select>
+          <label className="fl" style={{ marginTop: 12 }}>Prazo (opcional)</label>
+          <input type="datetime-local" value={due} onChange={e => setDue(e.target.value)} />
+          <label className="fl" style={{ marginTop: 12 }}>Prioridade</label>
+          <div className="seg">
+            <button className={priority === 'normal' ? 'on' : ''} onClick={() => setPriority('normal')}>Normal</button>
+            <button className={priority === 'high' ? 'on' : ''} onClick={() => setPriority('high')}>Alta</button>
+          </div>
+          <div className="rec-nav">
+            <button className="btn-ghost" onClick={() => setShowNew(false)}>Cancelar</button>
+            <button className="btn-primary" disabled={busy || title.trim().length < 2 || !assignTo} onClick={create}>
+              {busy ? 'A criar…' : 'Criar tarefa'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="list" style={{ marginTop: 14 }}>
+        {list.map(t => {
+          const u = tab === 'mine' ? urgency(t) : 'none'
+          return (
+            <div key={t.id} className={`task-row ${t.status === 'done' ? 'done' : ''} u-${u}`}>
+              <div className="task-main">
+                <div className="task-title">
+                  {t.priority === 'high' && t.status !== 'done' && <i className="ti ti-flag-filled task-flag" aria-hidden="true"></i>}
+                  {t.title}
+                </div>
+                {t.description && <div className="task-desc">{t.description}</div>}
+                <div className="task-meta">
+                  {tab === 'mine'
+                    ? <>de {t.assigned_by_name}</>
+                    : <>para {t.assigned_to_name}</>}
+                  {t.due_date && <> · <span className={`task-due u-${u}`}>{u === 'overdue' ? 'Atrasada · ' : u === 'soon' ? 'A expirar · ' : ''}{fmtDate(t.due_date)}</span></>}
+                  {t.status === 'done' && t.was_on_time === false && <> · <span className="task-late">concluída fora do prazo</span></>}
+                </div>
+              </div>
+              <div className="task-actions">
+                {tab === 'mine' && t.status !== 'done' && STATUS_NEXT[t.status] && (
+                  <button className="btn-primary btn-sm" onClick={() => setStatus(t, STATUS_NEXT[t.status].to)}>
+                    <i className={`ti ${STATUS_NEXT[t.status].icon}`} aria-hidden="true"></i> {STATUS_NEXT[t.status].label}
+                  </button>
+                )}
+                {t.status === 'done' && <span className="task-check"><i className="ti ti-circle-check-filled" aria-hidden="true"></i></span>}
+                {tab === 'assigned' && (
+                  <button className="btn-ghost btn-sm danger" onClick={() => removeTask(t)} title="Apagar"><i className="ti ti-trash" aria-hidden="true"></i></button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+        {list.length === 0 && <p className="empty">{tab === 'mine' ? 'Não tens tarefas atribuídas.' : 'Ainda não atribuíste tarefas.'}</p>}
       </div>
     </main>
   )

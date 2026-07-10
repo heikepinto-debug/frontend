@@ -1,0 +1,11 @@
+<svg width="220" height="56" viewBox="0 0 220 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="oh" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4F46E5"/><stop offset="1" stop-color="#6366F1"/></linearGradient></defs>
+  <rect width="56" height="56" rx="15" fill="url(#oh)"/>
+  <g transform="translate(12,12)">
+    <circle cx="16" cy="16" r="14.5" fill="none" stroke="#fff" stroke-width="3.4"/>
+    <line x1="10.5" y1="10.5" x2="10.5" y2="21.5" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/>
+    <line x1="21.5" y1="10.5" x2="21.5" y2="21.5" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/>
+    <line x1="10.5" y1="16" x2="21.5" y2="16" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/>
+  </g>
+  <text x="72" y="35" font-family="Inter, system-ui, sans-serif" font-weight="600" font-size="22" letter-spacing="-0.5" fill="#18181B">OficinaHub</text>
+</svg>
