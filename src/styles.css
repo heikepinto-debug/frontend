@@ -366,3 +366,61 @@ textarea { resize: vertical; line-height: 1.55; }
 .del-pending-head { font-weight: 700; color: #B45309; font-size: 14px; display: flex; align-items: center; gap: 8px; }
 @media (prefers-color-scheme: dark) { .del-pending { background: rgba(245,158,11,.12); } }
 .btn-ghost.danger { color: var(--danger); }
+
+/* ── Fundo com doodles de oficina (subtil) ────────────────── */
+/* Aplica-se ao login e ao ecrã inicial. Muito ténue, só ambiente. */
+.login-page, .home-bg {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260' viewBox='0 0 260 260'%3E%3Cg fill='none' stroke='%23000000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' opacity='0.04'%3E%3C!-- chave inglesa --%3E%3Cpath d='M30 40 l26 26 M52 34 a9 9 0 1 0 -13 13 l10 10 a9 9 0 0 0 13 -13 z'/%3E%3C!-- roda --%3E%3Ccircle cx='190' cy='45' r='22'/%3E%3Ccircle cx='190' cy='45' r='8'/%3E%3Cline x1='190' y1='23' x2='190' y2='30'/%3E%3Cline x1='190' y1='60' x2='190' y2='67'/%3E%3Cline x1='168' y1='45' x2='175' y2='45'/%3E%3Cline x1='205' y1='45' x2='212' y2='45'/%3E%3C!-- carro --%3E%3Cpath d='M25 175 l8 -20 a6 6 0 0 1 5 -3 h34 a6 6 0 0 1 5 3 l8 20 M20 175 h78 v14 h-78 z'/%3E%3Ccircle cx='38' cy='189' r='6'/%3E%3Ccircle cx='80' cy='189' r='6'/%3E%3C!-- chave de bocas --%3E%3Cpath d='M150 150 l30 30 M148 152 a7 7 0 0 0 -2 8 l24 24 a7 7 0 0 0 8 -2 M182 186 a7 7 0 0 0 2 -8 l-24 -24 a7 7 0 0 0 -8 2'/%3E%3C!-- bateria --%3E%3Crect x='205' y='150' width='34' height='24' rx='2'/%3E%3Cline x1='213' y1='150' x2='213' y2='145'/%3E%3Cline x1='231' y1='150' x2='231' y2='145'/%3E%3Cline x1='210' y1='162' x2='218' y2='162'/%3E%3Cline x1='226' y1='162' x2='234' y2='162'/%3E%3Cline x1='230' y1='158' x2='230' y2='166'/%3E%3C!-- roda dentada --%3E%3Ccircle cx='120' cy='100' r='14'/%3E%3Ccircle cx='120' cy='100' r='5'/%3E%3Cpath d='M120 82 v-6 M120 118 v6 M138 100 h6 M96 100 h6 M133 87 l4 -4 M103 113 l-4 4 M133 113 l4 4 M103 87 l-4 -4'/%3E%3C/g%3E%3C/svg%3E");
+  background-size: 340px 340px;
+  background-repeat: repeat;
+}
+@media (prefers-color-scheme: dark) {
+  .login-page, .home-bg {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260' viewBox='0 0 260 260'%3E%3Cg fill='none' stroke='%23FFFFFF' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' opacity='0.035'%3E%3Cpath d='M30 40 l26 26 M52 34 a9 9 0 1 0 -13 13 l10 10 a9 9 0 0 0 13 -13 z'/%3E%3Ccircle cx='190' cy='45' r='22'/%3E%3Ccircle cx='190' cy='45' r='8'/%3E%3Cline x1='190' y1='23' x2='190' y2='30'/%3E%3Cline x1='190' y1='60' x2='190' y2='67'/%3E%3Cline x1='168' y1='45' x2='175' y2='45'/%3E%3Cline x1='205' y1='45' x2='212' y2='45'/%3E%3Cpath d='M25 175 l8 -20 a6 6 0 0 1 5 -3 h34 a6 6 0 0 1 5 3 l8 20 M20 175 h78 v14 h-78 z'/%3E%3Ccircle cx='38' cy='189' r='6'/%3E%3Ccircle cx='80' cy='189' r='6'/%3E%3Cpath d='M150 150 l30 30 M148 152 a7 7 0 0 0 -2 8 l24 24 a7 7 0 0 0 8 -2 M182 186 a7 7 0 0 0 2 -8 l-24 -24 a7 7 0 0 0 -8 2'/%3E%3Crect x='205' y='150' width='34' height='24' rx='2'/%3E%3Cline x1='213' y1='150' x2='213' y2='145'/%3E%3Cline x1='231' y1='150' x2='231' y2='145'/%3E%3Ccircle cx='120' cy='100' r='14'/%3E%3Ccircle cx='120' cy='100' r='5'/%3E%3Cpath d='M120 82 v-6 M120 118 v6 M138 100 h6 M96 100 h6'/%3E%3C/g%3E%3C/svg%3E");
+    background-size: 340px 340px;
+  }
+}
+
+/* ── Prioridade ───────────────────────────────────────────── */
+.prio-current { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.prio-badge { font-size: 12px; font-weight: 700; padding: 4px 11px; border-radius: 20px; }
+.prio-badge.p-urgent { background: #FEE2E2; color: #B91C1C; }
+.prio-badge.p-high { background: #FFEDD5; color: #C2410C; }
+.prio-badge.p-normal { background: #E0E7FF; color: #4338CA; }
+.prio-badge.p-low { background: #F3F4F6; color: #6B7280; }
+.prio-reason { font-size: 13px; color: var(--ink-2); }
+.prio-form { margin-top: 12px; }
+.prio-levels { display: flex; gap: 6px; }
+.prio-lvl { flex: 1; padding: 9px; border: 1px solid var(--line-2); background: var(--s1); border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--ink-2); }
+.prio-lvl.on.p-urgent { background: #FEE2E2; border-color: #B91C1C; color: #B91C1C; }
+.prio-lvl.on.p-high { background: #FFEDD5; border-color: #C2410C; color: #C2410C; }
+.prio-lvl.on.p-normal { background: #E0E7FF; border-color: #4338CA; color: #4338CA; }
+.prio-lvl.on.p-low { background: #E5E7EB; border-color: #6B7280; color: #374151; }
+.list-prio { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 10px; margin-left: 6px; }
+.list-prio.p-urgent { background: #FEE2E2; color: #B91C1C; }
+.list-prio.p-high { background: #FFEDD5; color: #C2410C; }
+@media (prefers-color-scheme: dark) {
+  .prio-badge.p-urgent, .prio-lvl.on.p-urgent { background: rgba(185,28,28,.2); }
+  .prio-badge.p-high, .prio-lvl.on.p-high { background: rgba(194,65,12,.2); }
+  .prio-badge.p-normal, .prio-lvl.on.p-normal { background: rgba(67,56,202,.2); }
+}
+
+/* ── Tarefas evoluídas ────────────────────────────────────── */
+.wbadge { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 10px; margin-left: 6px; vertical-align: middle; }
+.wbadge.crit { background: #FEE2E2; color: #B91C1C; }
+.wbadge.imp { background: #FFEDD5; color: #C2410C; }
+.wbadge.pers { background: #E0E7FF; color: #4338CA; }
+.task-jo, .task-rec, .task-att { color: var(--ink-3); }
+.task-await { color: #B45309; font-weight: 600; }
+.chk-inline { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); margin-top: 10px; cursor: pointer; }
+.chk-inline input { width: 17px; height: 17px; accent-color: var(--brand); }
+.report-sec { margin-top: 16px; }
+.report-sec-title { font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 8px; }
+.report-sec-title.warn { color: #B45309; }
+.report-sec-title.danger { color: var(--danger); }
+.report-item { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--ink-2); padding: 6px 0; border-bottom: 1px solid var(--line); }
+@media (prefers-color-scheme: dark) {
+  .wbadge.crit { background: rgba(185,28,28,.2); }
+  .wbadge.imp { background: rgba(194,65,12,.2); }
+  .wbadge.pers { background: rgba(67,56,202,.2); }
+}

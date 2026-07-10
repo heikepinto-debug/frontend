@@ -17,6 +17,7 @@ export interface Tenant {
 interface Session {
   accessToken: string | null
   refreshToken: string | null
+  lastActivity: number          // timestamp da última actividade (para timeout)
   user: { id: string; name: string; email: string } | null
   roles: string[]
   permissions: string[]
@@ -24,6 +25,8 @@ interface Session {
 
   setSession: (s: Partial<Session>) => void
   logout: () => void
+  touch: () => void                          // regista actividade
+  checkTimeout: () => boolean                // true se expirou (e faz logout)
   can: (perm: string) => boolean
   hasModule: (code: string) => boolean
 }
@@ -31,11 +34,11 @@ interface Session {
 export const useSession = create<Session>()(
   persist(
     (set, get) => ({
-      accessToken: null, refreshToken: null,
+      accessToken: null, refreshToken: null, lastActivity: Date.now(),
       user: null, roles: [], permissions: [], tenant: null,
 
       setSession: (s) => {
-        set(s as any)
+        set({ ...s, lastActivity: Date.now() } as any)
         if (s.tenant) applyBranding(s.tenant as Tenant)
       },
 
@@ -54,6 +57,18 @@ export const useSession = create<Session>()(
       },
 
       hasModule: (code) => get().tenant?.modules?.includes(code) ?? false,
+
+      touch: () => { if (get().accessToken) set({ lastActivity: Date.now() }) },
+
+      checkTimeout: () => {
+        const TIMEOUT = 12 * 60 * 60 * 1000   // 12 horas de inatividade
+        const { accessToken, lastActivity } = get()
+        if (accessToken && Date.now() - lastActivity > TIMEOUT) {
+          get().logout()
+          return true
+        }
+        return false
+      },
     }),
     {
       name: 'oficinahub-session',

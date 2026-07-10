@@ -119,7 +119,7 @@ function Shell() {
       </header>
 
       {view === 'home' && (
-        <main className="home">
+        <main className="home home-bg">
           <h1>Olá, {user?.name?.split(' ')[0]}</h1>
           <div className="home-actions">
             <button className="action-card" onClick={() => { setResumeDraftId(undefined); setView('reception') }}>
@@ -149,7 +149,7 @@ function Shell() {
       {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} />}
       {view === 'detail' && detailId && <ReceptionDetail joId={detailId} onBack={() => setView('list')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} isOwner={isOwner} />}
       {view === 'bookings' && <Bookings onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} />}
-      {view === 'tasks' && <Tasks onBack={() => setView('home')} />}
+      {view === 'tasks' && <Tasks onBack={() => setView('home')} isOwner={isOwner} myId={user?.id || ''} />}
     </div>
   )
 }
@@ -1038,6 +1038,7 @@ function SignaturePad({ onChange }: { onChange: (dataUrl: string | null) => void
 }
 
 // ── Lista de recepções ───────────────────────────────────────
+const PRIO_LABEL: Record<string, string> = { urgent: 'Urgente', high: 'Alta', normal: 'Normal', low: 'Baixa' }
 const STATUS_LABEL: Record<string, string> = {
   draft: 'Rascunho',
   reception: 'Em recepção',
@@ -1125,7 +1126,9 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner }: { onBack: () => vo
               <span className="jo-num" onClick={() => onOpen(r.id)}>{r.number}</span>
               <span className="plate" onClick={() => onOpen(r.id)}>{r.plate}</span>
               <div style={{ flex: 1, minWidth: 0 }} onClick={() => onOpen(r.id)}>
-                <div className="list-name">{r.customer_name}</div>
+                <div className="list-name">{r.customer_name}
+                  {(r.priority_level === 'urgent' || r.priority_level === 'high') && <span className={`list-prio p-${r.priority_level}`}>{r.priority_level === 'urgent' ? 'URGENTE' : 'ALTA'}</span>}
+                </div>
                 <div className="list-sub">{r.brand} {r.model}{isDraft ? '' : ` · ${r.photo_count} fotos${r.signed_at ? ' · assinada' : ''}`}</div>
               </div>
               {isDraft
@@ -1169,9 +1172,20 @@ function ReceptionDetail({ joId, onBack, onResume, isOwner }: { joId: string; on
   const [photo, setPhoto] = useState<string | null>(null)  // foto ampliada
   const [delReason, setDelReason] = useState('')
   const [showDelForm, setShowDelForm] = useState(false)
+  const [criteria, setCriteria] = useState<any[]>([])
+  const [showPrioForm, setShowPrioForm] = useState(false)
+  const [prioLevel, setPrioLevel] = useState('normal')
+  const [prioReason, setPrioReason] = useState('')
+  const [prioNote, setPrioNote] = useState('')
 
   useEffect(() => {
-    api(`/api/v1/receptions/${joId}`).then(setJo).catch(() => {}).finally(() => setLoading(false))
+    api(`/api/v1/receptions/${joId}`).then((d) => {
+      setJo(d)
+      if (d.priority_level) setPrioLevel(d.priority_level)
+      if (d.priority_reason) setPrioReason(d.priority_reason)
+      if (d.priority_reason_note) setPrioNote(d.priority_reason_note)
+    }).catch(() => {}).finally(() => setLoading(false))
+    api('/api/v1/reception-config').then(r => setCriteria(r.priorityCriteria || [])).catch(() => {})
   }, [joId])
 
   if (loading) return <main className="reception"><p className="empty">A carregar…</p></main>
@@ -1220,6 +1234,59 @@ function ReceptionDetail({ joId, onBack, onResume, isOwner }: { joId: string; on
           <Row label="Iniciada por" value={jo.draft_created_by_name} />
         )}
       </div>
+
+      {!isDraft && (
+        <div className="det-section">
+          <div className="det-section-title">Prioridade</div>
+          {jo.priority_level ? (
+            <>
+              <div className="prio-current">
+                <span className={`prio-badge p-${jo.priority_level}`}>{PRIO_LABEL[jo.priority_level]}</span>
+                <span className="prio-reason">{jo.priority_reason}{jo.priority_reason_note ? ` — ${jo.priority_reason_note}` : ''}</span>
+              </div>
+              {jo.priority_corrected_at && <p className="det-notes">Prioridade corrigida pela Direcção.</p>}
+            </>
+          ) : <p className="det-empty">Sem prioridade definida.</p>}
+
+          {!showPrioForm ? (
+            <button className="btn-ghost btn-sm" style={{ marginTop: 10 }} onClick={() => setShowPrioForm(true)}>
+              <i className="ti ti-flag" aria-hidden="true"></i> {jo.priority_level ? 'Alterar prioridade' : 'Definir prioridade'}
+            </button>
+          ) : (
+            <div className="prio-form">
+              <label className="fl">Nível</label>
+              <div className="prio-levels">
+                {[['urgent', 'Urgente'], ['high', 'Alta'], ['normal', 'Normal'], ['low', 'Baixa']].map(([v, l]) => (
+                  <button key={v} className={`prio-lvl p-${v} ${prioLevel === v ? 'on' : ''}`} onClick={() => setPrioLevel(v)}>{l}</button>
+                ))}
+              </div>
+              <label className="fl" style={{ marginTop: 12 }}>Razão <span className="req">*</span></label>
+              <select value={prioReason} onChange={e => setPrioReason(e.target.value)}>
+                <option value="">Escolher critério…</option>
+                {criteria.map(c => <option key={c.id} value={c.label}>{c.label}</option>)}
+                <option value="__outro__">Outro (especificar)</option>
+              </select>
+              {prioReason === '__outro__' && (
+                <input style={{ marginTop: 8 }} value={prioNote} onChange={e => setPrioNote(e.target.value)} placeholder="Qual a razão?" />
+              )}
+              {prioReason && prioReason !== '__outro__' && (
+                <input style={{ marginTop: 8 }} value={prioNote} onChange={e => setPrioNote(e.target.value)} placeholder="Nota (opcional)" />
+              )}
+              <div className="rec-nav">
+                <button className="btn-ghost" onClick={() => setShowPrioForm(false)}>Voltar</button>
+                <button className="btn-primary" disabled={!prioReason || (prioReason === '__outro__' && !prioNote.trim())} onClick={async () => {
+                  try {
+                    const reason = prioReason === '__outro__' ? 'Outro' : prioReason
+                    await api(`/api/v1/receptions/${joId}/priority`, { method: 'POST', body: JSON.stringify({ level: prioLevel, reason, note: prioNote || undefined }) })
+                    setShowPrioForm(false)
+                    api(`/api/v1/receptions/${joId}`).then(setJo).catch(() => {})
+                  } catch { alert('Não foi possível definir a prioridade.') }
+                }}>Guardar</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="det-section">
         <div className="det-section-title">Cliente</div>
@@ -1472,13 +1539,15 @@ function Bookings({ onBack, onResume }: { onBack: () => void; onResume: (id: str
 }
 
 // ── TAREFAS (to-do list hierárquica) ─────────────────────────
-function Tasks({ onBack }: { onBack: () => void }) {
+function Tasks({ onBack, isOwner, myId }: { onBack: () => void; isOwner: boolean; myId: string }) {
   const [mine, setMine] = useState<any[]>([])
   const [assigned, setAssigned] = useState<any[]>([])
   const [assignable, setAssignable] = useState<any[]>([])
   const [tab, setTab] = useState<'mine' | 'assigned'>('mine')
   const [showNew, setShowNew] = useState(false)
   const [showNotice, setShowNotice] = useState(false)
+  const [showReport, setShowReport] = useState(false)
+  const [report, setReport] = useState<any>(null)
 
   // formulário nova tarefa
   const [title, setTitle] = useState('')
@@ -1486,6 +1555,10 @@ function Tasks({ onBack }: { onBack: () => void }) {
   const [assignTo, setAssignTo] = useState('')
   const [due, setDue] = useState('')
   const [priority, setPriority] = useState<'normal' | 'high'>('normal')
+  const [weight, setWeight] = useState<'normal' | 'important' | 'critical'>('normal')
+  const [recurrence, setRecurrence] = useState('')
+  const [reqConfirm, setReqConfirm] = useState(false)
+  const [reqAttach, setReqAttach] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const load = () => {
@@ -1494,9 +1567,12 @@ function Tasks({ onBack }: { onBack: () => void }) {
   }
   useEffect(() => {
     load()
-    // aviso de desempenho — só a 1ª vez
     api('/api/v1/tasks/perf-notice').then(r => { if (!r.seen) setShowNotice(true) }).catch(() => {})
   }, [])
+
+  const openReport = async () => {
+    try { const r = await api('/api/v1/tasks/weekly-report'); setReport(r); setShowReport(true) } catch { alert('Não foi possível carregar o relatório.') }
+  }
 
   const dismissNotice = async () => {
     setShowNotice(false)
@@ -1510,18 +1586,41 @@ function Tasks({ onBack }: { onBack: () => void }) {
       await api('/api/v1/tasks', { method: 'POST', body: JSON.stringify({
         title, description: desc || undefined, assignedTo: assignTo,
         dueDate: due || undefined, priority,
+        weight: isOwner ? weight : undefined,
+        isPersonal: assignTo === myId,
+        requiresConfirmation: reqConfirm || undefined,
+        requiresAttachment: reqAttach || undefined,
+        recurrence: recurrence || undefined,
       }) })
-      setTitle(''); setDesc(''); setAssignTo(''); setDue(''); setPriority('normal'); setShowNew(false)
+      setTitle(''); setDesc(''); setAssignTo(''); setDue(''); setPriority('normal')
+      setWeight('normal'); setRecurrence(''); setReqConfirm(false); setReqAttach(false); setShowNew(false)
       load()
     } catch (e: any) { alert(e?.message || 'Não foi possível criar a tarefa.') }
     finally { setBusy(false) }
   }
 
   const setStatus = async (t: any, status: string) => {
+    // Se a tarefa exige anexo e vai ser concluída, pede o ficheiro primeiro
+    if (status === 'done' && t.requires_attachment && !t.attachment_path) {
+      const input = document.createElement('input')
+      input.type = 'file'; input.accept = 'image/*,application/pdf'
+      input.onchange = async () => {
+        const f = input.files?.[0]; if (!f) return
+        const ext = f.name.split('.').pop() || 'jpg'
+        try {
+          const r = await api(`/api/v1/tasks/${t.id}/attachment-url`, { method: 'POST', body: JSON.stringify({ ext }) })
+          await fetch(r.uploadUrl, { method: 'PUT', body: f, headers: { 'Content-Type': f.type } })
+          await api(`/api/v1/tasks/${t.id}/status`, { method: 'POST', body: JSON.stringify({ status: 'done' }) })
+          load()
+        } catch { alert('Não foi possível anexar o ficheiro.') }
+      }
+      input.click()
+      return
+    }
     try {
       await api(`/api/v1/tasks/${t.id}/status`, { method: 'POST', body: JSON.stringify({ status }) })
       load()
-    } catch { alert('Não foi possível actualizar.') }
+    } catch (e: any) { alert(e?.message || 'Não foi possível actualizar.') }
   }
   const removeTask = async (t: any) => {
     if (!confirm(`Apagar a tarefa "${t.title}"?`)) return
@@ -1564,17 +1663,45 @@ function Tasks({ onBack }: { onBack: () => void }) {
         </div>
       )}
 
+      {showReport && report && (
+        <div className="notice-overlay" onClick={() => setShowReport(false)}>
+          <div className="notice-card" style={{ textAlign: 'left', maxWidth: 460, maxHeight: '80vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ textAlign: 'center' }}>Relatório semanal</h2>
+            <div className="report-sec">
+              <div className="report-sec-title">Concluídas ({report.completed.length})</div>
+              {report.completed.length === 0 ? <p className="det-empty">Nenhuma.</p> : report.completed.map((r: any, i: number) => (
+                <div key={i} className="report-item"><span>{r.title} · {r.who}</span>{r.was_on_time === false && <span className="task-late">fora do prazo</span>}</div>
+              ))}
+            </div>
+            <div className="report-sec">
+              <div className="report-sec-title warn">Aguardam a tua confirmação ({report.awaiting.length})</div>
+              {report.awaiting.length === 0 ? <p className="det-empty">Nenhuma.</p> : report.awaiting.map((r: any, i: number) => (
+                <div key={i} className="report-item"><span>{r.title} · {r.who}</span></div>
+              ))}
+            </div>
+            <div className="report-sec">
+              <div className="report-sec-title danger">Atrasadas ({report.late.length})</div>
+              {report.late.length === 0 ? <p className="det-empty">Nenhuma.</p> : report.late.map((r: any, i: number) => (
+                <div key={i} className="report-item"><span>{r.title} · {r.who}</span></div>
+              ))}
+            </div>
+            <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 12 }} onClick={() => setShowReport(false)}>Fechar</button>
+          </div>
+        </div>
+      )}
+
       <div className="rec-top" style={{ marginBottom: 16 }}>
         <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
         <h2 style={{ margin: 0, fontSize: 20 }}>Tarefas</h2>
-        {assignable.length > 0
-          ? <button className="btn-primary btn-sm" onClick={() => setShowNew(true)}><i className="ti ti-plus" aria-hidden="true"></i> Nova</button>
-          : <span />}
+        <div style={{ display: 'flex', gap: 6 }}>
+          {isOwner && <button className="btn-ghost btn-sm" onClick={openReport} title="Relatório semanal"><i className="ti ti-report" aria-hidden="true"></i></button>}
+          <button className="btn-primary btn-sm" onClick={() => setShowNew(true)}><i className="ti ti-plus" aria-hidden="true"></i> Nova</button>
+        </div>
       </div>
 
       <div className="task-tabs">
         <button className={tab === 'mine' ? 'on' : ''} onClick={() => setTab('mine')}>As minhas ({mine.filter(t => t.status !== 'done').length})</button>
-        {assignable.length > 0 && <button className={tab === 'assigned' ? 'on' : ''} onClick={() => setTab('assigned')}>Que atribuí ({assigned.filter(t => t.status !== 'done').length})</button>}
+        {(assignable.length > 0 || assigned.length > 0) && <button className={tab === 'assigned' ? 'on' : ''} onClick={() => setTab('assigned')}>Que atribuí ({assigned.filter(t => t.status !== 'done').length})</button>}
       </div>
 
       {showNew && (
@@ -1586,15 +1713,37 @@ function Tasks({ onBack }: { onBack: () => void }) {
           <label className="fl" style={{ marginTop: 12 }}>Responsável <span className="req">*</span></label>
           <select value={assignTo} onChange={e => setAssignTo(e.target.value)}>
             <option value="">Escolher…</option>
+            <option value={myId}>Para mim (lembrete pessoal)</option>
             {assignable.map(u => <option key={u.id} value={u.id}>{u.full_name} — {u.role_name}</option>)}
           </select>
           <label className="fl" style={{ marginTop: 12 }}>Prazo (opcional)</label>
           <input type="datetime-local" value={due} onChange={e => setDue(e.target.value)} />
-          <label className="fl" style={{ marginTop: 12 }}>Prioridade</label>
+          <label className="fl" style={{ marginTop: 12 }}>Repetição</label>
           <div className="seg">
-            <button className={priority === 'normal' ? 'on' : ''} onClick={() => setPriority('normal')}>Normal</button>
-            <button className={priority === 'high' ? 'on' : ''} onClick={() => setPriority('high')}>Alta</button>
+            {[['', 'Única'], ['daily', 'Diária'], ['weekly', 'Semanal'], ['monthly', 'Mensal']].map(([v, l]) => (
+              <button key={v} className={recurrence === v ? 'on' : ''} onClick={() => setRecurrence(v)}>{l}</button>
+            ))}
           </div>
+          {isOwner && (
+            <>
+              <label className="fl" style={{ marginTop: 12 }}>Peso (avaliação)</label>
+              <div className="seg">
+                {[['normal', 'Normal'], ['important', 'Importante'], ['critical', 'Crítica']].map(([v, l]) => (
+                  <button key={v} className={weight === v ? 'on' : ''} onClick={() => setWeight(v as any)}>{l}</button>
+                ))}
+              </div>
+            </>
+          )}
+          {assignTo !== myId && (
+            <label className="chk-inline" style={{ marginTop: 14 }}>
+              <input type="checkbox" checked={reqConfirm} onChange={e => setReqConfirm(e.target.checked)} />
+              Exige a minha confirmação quando concluída
+            </label>
+          )}
+          <label className="chk-inline">
+            <input type="checkbox" checked={reqAttach} onChange={e => setReqAttach(e.target.checked)} />
+            Exige anexo (foto ou PDF) para concluir
+          </label>
           <div className="rec-nav">
             <button className="btn-ghost" onClick={() => setShowNew(false)}>Cancelar</button>
             <button className="btn-primary" disabled={busy || title.trim().length < 2 || !assignTo} onClick={create}>
@@ -1613,24 +1762,36 @@ function Tasks({ onBack }: { onBack: () => void }) {
                 <div className="task-title">
                   {t.priority === 'high' && t.status !== 'done' && <i className="ti ti-flag-filled task-flag" aria-hidden="true"></i>}
                   {t.title}
+                  {t.weight === 'critical' && <span className="wbadge crit">Crítica</span>}
+                  {t.weight === 'important' && <span className="wbadge imp">Importante</span>}
+                  {t.is_personal && <span className="wbadge pers">Pessoal</span>}
                 </div>
                 {t.description && <div className="task-desc">{t.description}</div>}
                 <div className="task-meta">
                   {tab === 'mine'
                     ? <>de {t.assigned_by_name}</>
                     : <>para {t.assigned_to_name}</>}
+                  {t.jo_number && <> · <span className="task-jo"><i className="ti ti-car" aria-hidden="true"></i> {t.jo_plate || t.jo_number}</span></>}
+                  {t.recurrence && <> · <span className="task-rec"><i className="ti ti-repeat" aria-hidden="true"></i> {t.recurrence === 'daily' ? 'diária' : t.recurrence === 'weekly' ? 'semanal' : 'mensal'}</span></>}
                   {t.due_date && <> · <span className={`task-due u-${u}`}>{u === 'overdue' ? 'Atrasada · ' : u === 'soon' ? 'A expirar · ' : ''}{fmtDate(t.due_date)}</span></>}
+                  {t.status === 'awaiting_confirmation' && <> · <span className="task-await">aguarda confirmação</span></>}
                   {t.status === 'done' && t.was_on_time === false && <> · <span className="task-late">concluída fora do prazo</span></>}
+                  {t.requires_attachment && t.status !== 'done' && <> · <span className="task-att"><i className="ti ti-paperclip" aria-hidden="true"></i> exige anexo</span></>}
                 </div>
               </div>
               <div className="task-actions">
-                {tab === 'mine' && t.status !== 'done' && STATUS_NEXT[t.status] && (
+                {tab === 'mine' && t.status !== 'done' && t.status !== 'awaiting_confirmation' && STATUS_NEXT[t.status] && (
                   <button className="btn-primary btn-sm" onClick={() => setStatus(t, STATUS_NEXT[t.status].to)}>
                     <i className={`ti ${STATUS_NEXT[t.status].icon}`} aria-hidden="true"></i> {STATUS_NEXT[t.status].label}
                   </button>
                 )}
+                {tab === 'assigned' && t.status === 'awaiting_confirmation' && (
+                  <button className="btn-primary btn-sm" onClick={async () => { try { await api(`/api/v1/tasks/${t.id}/confirm`, { method: 'POST' }); load() } catch { alert('Erro.') } }}>
+                    <i className="ti ti-check" aria-hidden="true"></i> Confirmar
+                  </button>
+                )}
                 {t.status === 'done' && <span className="task-check"><i className="ti ti-circle-check-filled" aria-hidden="true"></i></span>}
-                {tab === 'assigned' && (
+                {tab === 'assigned' && t.status !== 'awaiting_confirmation' && (
                   <button className="btn-ghost btn-sm danger" onClick={() => removeTask(t)} title="Apagar"><i className="ti ti-trash" aria-hidden="true"></i></button>
                 )}
               </div>
@@ -1646,6 +1807,18 @@ function Tasks({ onBack }: { onBack: () => void }) {
 // ── Bootstrap ────────────────────────────────────────────────
 function App() {
   const token = useSession(s => s.accessToken)
+  const checkTimeout = useSession(s => s.checkTimeout)
+  const touch = useSession(s => s.touch)
+
+  useEffect(() => {
+    checkTimeout()   // ao abrir a app
+    const iv = setInterval(() => checkTimeout(), 60 * 1000)   // verifica a cada minuto
+    const onActivity = () => touch()
+    const events = ['click', 'keydown', 'touchstart', 'visibilitychange']
+    events.forEach(e => window.addEventListener(e, onActivity))
+    return () => { clearInterval(iv); events.forEach(e => window.removeEventListener(e, onActivity)) }
+  }, [])
+
   return token ? <Shell /> : <Login />
 }
 createRoot(document.getElementById('root')!).render(<App />)
