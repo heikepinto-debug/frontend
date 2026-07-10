@@ -339,3 +339,30 @@ textarea { resize: vertical; line-height: 1.55; }
 .review-sys-item { font-size: 12px; padding: 4px 9px; border-radius: 20px; background: var(--s2); border: 1px solid var(--line); color: var(--ink-2); }
 .review-sys-item.ok { background: #DCFCE7; border-color: #86EFAC; color: #15803D; }
 .review-sys-item.fail { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
+
+/* ── Cartão com contador ──────────────────────────────────── */
+.action-ic { position: relative; }
+.card-badge { position: absolute; top: -6px; right: -6px; background: var(--danger); color: #fff; font-size: 11px; font-weight: 700; min-width: 20px; height: 20px; border-radius: 10px; display: flex; align-items: center; justify-content: center; padding: 0 5px; }
+
+/* ── Marcações ────────────────────────────────────────────── */
+.booking-group { margin-bottom: 20px; }
+.booking-group-title { font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 10px; display: flex; align-items: center; gap: 7px; }
+.booking-group-title.late { color: var(--danger); }
+.booking-group-title.today { color: var(--brand-dark); }
+.booking-row { display: flex; align-items: center; gap: 12px; padding: 13px; background: var(--s1); border: 1px solid var(--line); border-radius: var(--radius); border-left-width: 3px; margin-bottom: 8px; }
+.booking-row.k-late { border-left-color: var(--danger); background: var(--danger-bg); }
+.booking-row.k-today { border-left-color: var(--brand); }
+.booking-row.k-future { border-left-color: var(--line-2); }
+.booking-main { flex: 1; min-width: 0; }
+.booking-when { font-size: 14px; font-weight: 600; color: var(--ink); text-transform: capitalize; }
+.booking-who { font-size: 13px; color: var(--ink); margin-top: 2px; }
+.booking-veh { font-size: 12px; color: var(--ink-3); }
+.booking-actions { display: flex; gap: 5px; flex-shrink: 0; }
+
+/* ── Eliminação ───────────────────────────────────────────── */
+.badge-del { font-size: 11px; font-weight: 600; padding: 4px 9px; border-radius: 20px; background: var(--danger-bg); color: var(--danger); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.del-form { background: var(--danger-bg); border: 1px solid var(--danger); border-radius: var(--radius); padding: 16px; margin-top: 12px; }
+.del-pending { background: #FEF3C7; border: 1px solid #F59E0B; border-radius: var(--radius); padding: 16px; margin-top: 12px; }
+.del-pending-head { font-weight: 700; color: #B45309; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+@media (prefers-color-scheme: dark) { .del-pending { background: rgba(245,158,11,.12); } }
+.btn-ghost.danger { color: var(--danger); }

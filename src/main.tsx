@@ -72,11 +72,14 @@ function Login() {
 
 function Shell() {
   const { tenant, user, logout } = useSession()
+  const canDo = useSession(s => s.can)
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
+  const [bookingCount, setBookingCount] = useState(0)
+  const isOwner = canDo('jobdelete:any')
 
   useEffect(() => {
     const on = () => setOnline(true), off = () => setOnline(false)
@@ -85,6 +88,17 @@ function Shell() {
     const t = setInterval(() => offline.pendingCount().then(setPending), 5000)
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); clearInterval(t) }
   }, [])
+
+  // Contador de marcações (hoje + em atraso) — actualiza ao voltar ao início
+  useEffect(() => {
+    if (view === 'home') {
+      api('/api/v1/bookings').then(r => {
+        const now = new Date(); now.setHours(23, 59, 59, 999)
+        const relevant = (r.data || []).filter((b: any) => new Date(b.booking_date) <= now)
+        setBookingCount(relevant.length)
+      }).catch(() => {})
+    }
+  }, [view])
 
   return (
     <div className="shell">
@@ -118,6 +132,11 @@ function Shell() {
               <span className="action-title">Recepções</span>
               <span className="action-sub">Ver ordens de trabalho criadas</span>
             </button>
+            <button className="action-card" onClick={() => setView('bookings')}>
+              <div className="action-ic"><i className="ti ti-calendar-event" aria-hidden="true"></i>{bookingCount > 0 && <span className="card-badge">{bookingCount}</span>}</div>
+              <span className="action-title">Marcações</span>
+              <span className="action-sub">{bookingCount > 0 ? `${bookingCount} para hoje ou em atraso` : 'Agenda de veículos marcados'}</span>
+            </button>
             <button className="action-card" onClick={() => setView('tasks')}>
               <div className="action-ic"><i className="ti ti-checklist" aria-hidden="true"></i></div>
               <span className="action-title">Tarefas</span>
@@ -127,8 +146,9 @@ function Shell() {
         </main>
       )}
       {view === 'reception' && <Reception key={resumeDraftId || 'new'} resumeDraftId={resumeDraftId} onDone={() => { setResumeDraftId(undefined); setView('list') }} onBack={() => { setResumeDraftId(undefined); setView('home') }} />}
-      {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} />}
-      {view === 'detail' && detailId && <ReceptionDetail joId={detailId} onBack={() => setView('list')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} />}
+      {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} />}
+      {view === 'detail' && detailId && <ReceptionDetail joId={detailId} onBack={() => setView('list')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} isOwner={isOwner} />}
+      {view === 'bookings' && <Bookings onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} />}
       {view === 'tasks' && <Tasks onBack={() => setView('home')} />}
     </div>
   )
@@ -1032,7 +1052,7 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: 'Cancelado',
 }
 
-function ReceptionList({ onBack, onResume, onOpen }: { onBack: () => void; onResume: (id: string) => void; onOpen: (id: string) => void }) {
+function ReceptionList({ onBack, onResume, onOpen, isOwner }: { onBack: () => void; onResume: (id: string) => void; onOpen: (id: string) => void; isOwner: boolean }) {
   const canDelete = useSession(s => s.can('jobdelete:any'))
   const canStatus = useSession(s => s.can('jobdelete:any'))   // mudar estado: só dono, nesta fase
   const [rows, setRows] = useState<any[]>([])
@@ -1110,7 +1130,9 @@ function ReceptionList({ onBack, onResume, onOpen }: { onBack: () => void; onRes
               </div>
               {isDraft
                 ? <span className="badge-draft"><i className="ti ti-device-floppy" aria-hidden="true"></i> Rascunho</span>
-                : <span className={`status s-${r.status}`}>{STATUS_LABEL[r.status] || r.status}</span>}
+                : r.deletion_status === 'pending'
+                  ? <span className="badge-del"><i className="ti ti-trash-x" aria-hidden="true"></i> Elim. pendente</span>
+                  : <span className={`status s-${r.status}`}>{STATUS_LABEL[r.status] || r.status}</span>}
               {isDraft && (
                 <button className="btn-primary btn-sm" onClick={() => onResume(r.id)} title="Continuar lançamento">
                   Continuar <i className="ti ti-arrow-right" aria-hidden="true"></i>
@@ -1141,10 +1163,12 @@ function ReceptionList({ onBack, onResume, onOpen }: { onBack: () => void; onRes
 }
 
 // ── DETALHE DA RECEPÇÃO (ver informação registada) ───────────
-function ReceptionDetail({ joId, onBack, onResume }: { joId: string; onBack: () => void; onResume: (id: string) => void }) {
+function ReceptionDetail({ joId, onBack, onResume, isOwner }: { joId: string; onBack: () => void; onResume: (id: string) => void; isOwner: boolean }) {
   const [jo, setJo] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [photo, setPhoto] = useState<string | null>(null)  // foto ampliada
+  const [delReason, setDelReason] = useState('')
+  const [showDelForm, setShowDelForm] = useState(false)
 
   useEffect(() => {
     api(`/api/v1/receptions/${joId}`).then(setJo).catch(() => {}).finally(() => setLoading(false))
@@ -1265,6 +1289,183 @@ function ReceptionDetail({ joId, onBack, onResume }: { joId: string; onBack: () 
           onClick={async () => { try { const r = await api(`/api/v1/receptions/${joId}/pdf`); if (r.url) window.open(r.url, '_blank') } catch { alert('Não foi possível abrir o PDF.') } }}>
           <i className="ti ti-file-type-pdf" aria-hidden="true"></i> Ver documento de entrada (PDF)
         </button>
+      )}
+
+      {/* Eliminação */}
+      {jo.deletion_status === 'pending' ? (
+        <div className="del-pending">
+          <div className="del-pending-head"><i className="ti ti-clock-exclamation" aria-hidden="true"></i> Eliminação pendente de aprovação</div>
+          <p className="det-notes">Motivo: {jo.deletion_reason}{jo.deletion_requested_by_name ? ` · pedido por ${jo.deletion_requested_by_name}` : ''}</p>
+          {isOwner && (
+            <div className="rec-nav">
+              <button className="btn-ghost danger" onClick={async () => { if (confirm('Recusar o pedido de eliminação?')) { try { await api(`/api/v1/receptions/${joId}/decide-deletion`, { method: 'POST', body: JSON.stringify({ approve: false }) }); onBack() } catch { alert('Erro.') } } }}>Recusar</button>
+              <button className="btn-primary" onClick={async () => { if (confirm('Aprovar a eliminação? A entrada será cancelada.')) { try { await api(`/api/v1/receptions/${joId}/decide-deletion`, { method: 'POST', body: JSON.stringify({ approve: true }) }); onBack() } catch { alert('Erro.') } } }}>Aprovar eliminação</button>
+            </div>
+          )}
+        </div>
+      ) : showDelForm ? (
+        <div className="del-form">
+          <label className="fl">Motivo da eliminação <span className="req">*</span></label>
+          <input value={delReason} onChange={e => setDelReason(e.target.value)} placeholder="ex: entrada duplicada, dados errados…" />
+          <div className="rec-nav">
+            <button className="btn-ghost" onClick={() => setShowDelForm(false)}>Voltar</button>
+            <button className="btn-primary" disabled={!delReason.trim()} onClick={async () => {
+              try {
+                await api(`/api/v1/receptions/${joId}/request-deletion`, { method: 'POST', body: JSON.stringify({ reason: delReason }) })
+                alert(isOwner ? 'Pedido registado. Como dono, podes aprová-lo já.' : 'Pedido de eliminação enviado para aprovação.')
+                setShowDelForm(false); setDelReason('')
+                api(`/api/v1/receptions/${joId}`).then(setJo).catch(() => {})
+              } catch (e: any) { alert(e?.message || 'Não foi possível pedir a eliminação.') }
+            }}>Pedir eliminação</button>
+          </div>
+        </div>
+      ) : (
+        <button className="btn-ghost danger" style={{ width: '100%', justifyContent: 'center', marginTop: 8 }} onClick={() => setShowDelForm(true)}>
+          <i className="ti ti-trash" aria-hidden="true"></i> {isOwner ? 'Eliminar entrada' : 'Pedir eliminação'}
+        </button>
+      )}
+    </main>
+  )
+}
+
+// ── MARCAÇÕES ────────────────────────────────────────────────
+const CANCEL_REASONS = [
+  'O cliente adiou (sem data definida)',
+  'O cliente desistiu do serviço',
+  'O preço',
+  'O prazo de entrega',
+  'Foi a outra oficina',
+  'Não conseguimos contacto',
+  'O veículo ficou indisponível',
+  'Erro de marcação / duplicado',
+  'Outro',
+]
+
+function Bookings({ onBack, onResume }: { onBack: () => void; onResume: (id: string) => void }) {
+  const [list, setList] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [cancelId, setCancelId] = useState<string | null>(null)
+  const [reschedId, setReschedId] = useState<string | null>(null)
+  const [cancelReason, setCancelReason] = useState('')
+  const [cancelNote, setCancelNote] = useState('')
+  const [newDate, setNewDate] = useState('')
+
+  const load = () => { setLoading(true); api('/api/v1/bookings').then(r => setList(r.data || [])).catch(() => {}).finally(() => setLoading(false)) }
+  useEffect(() => { load() }, [])
+
+  const doCancel = async () => {
+    if (!cancelId || !cancelReason) return
+    try {
+      await api(`/api/v1/bookings/${cancelId}/cancel`, { method: 'POST', body: JSON.stringify({ reason: cancelReason, note: cancelNote || undefined }) })
+      setCancelId(null); setCancelReason(''); setCancelNote(''); load()
+    } catch { alert('Não foi possível cancelar.') }
+  }
+  const doResched = async () => {
+    if (!reschedId || !newDate) return
+    try {
+      await api(`/api/v1/bookings/${reschedId}/reschedule`, { method: 'POST', body: JSON.stringify({ bookingDate: newDate }) })
+      setReschedId(null); setNewDate(''); load()
+    } catch { alert('Não foi possível remarcar.') }
+  }
+
+  // agrupa: em atraso, hoje, futuras
+  const now = new Date()
+  const startToday = new Date(now); startToday.setHours(0, 0, 0, 0)
+  const endToday = new Date(now); endToday.setHours(23, 59, 59, 999)
+  const group = (b: any): 'late' | 'today' | 'future' => {
+    const d = new Date(b.booking_date)
+    if (d < startToday) return 'late'
+    if (d <= endToday) return 'today'
+    return 'future'
+  }
+  const late = list.filter(b => group(b) === 'late')
+  const today = list.filter(b => group(b) === 'today')
+  const future = list.filter(b => group(b) === 'future')
+  const fmt = (s: string) => new Date(s).toLocaleString('pt-PT', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+
+  const Card = ({ b, kind }: { b: any; kind: string }) => (
+    <div className={`booking-row k-${kind}`}>
+      <div className="booking-main">
+        <div className="booking-when">{fmt(b.booking_date)}</div>
+        <div className="booking-who">{b.customer_name} · {b.plate}</div>
+        <div className="booking-veh">{b.brand} {b.model}</div>
+      </div>
+      <div className="booking-actions">
+        <button className="btn-primary btn-sm" onClick={() => onResume(b.id)} title="Continuar entrada quando o carro chega"><i className="ti ti-arrow-right" aria-hidden="true"></i></button>
+        <button className="btn-ghost btn-sm" onClick={() => { setReschedId(b.id); setNewDate('') }} title="Remarcar"><i className="ti ti-calendar-plus" aria-hidden="true"></i></button>
+        <button className="btn-ghost btn-sm danger" onClick={() => { setCancelId(b.id); setCancelReason('') }} title="Cancelar"><i className="ti ti-x" aria-hidden="true"></i></button>
+      </div>
+    </div>
+  )
+
+  return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
+        <h2 style={{ margin: 0, fontSize: 20 }}>Marcações</h2>
+        <span />
+      </div>
+
+      {cancelId && (
+        <div className="notice-overlay">
+          <div className="notice-card" style={{ textAlign: 'left', maxWidth: 420 }}>
+            <h2 style={{ textAlign: 'center' }}>Cancelar marcação</h2>
+            <label className="fl">Motivo <span className="req">*</span></label>
+            <select value={cancelReason} onChange={e => setCancelReason(e.target.value)}>
+              <option value="">Escolher…</option>
+              {CANCEL_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+            {(cancelReason === 'Outro' || cancelReason === 'O preço' || cancelReason === 'O prazo de entrega') && (
+              <>
+                <label className="fl" style={{ marginTop: 10 }}>Detalhe {cancelReason === 'Outro' ? '(obrigatório)' : '(opcional)'}</label>
+                <input value={cancelNote} onChange={e => setCancelNote(e.target.value)} placeholder="Nota…" />
+              </>
+            )}
+            <div className="rec-nav">
+              <button className="btn-ghost" onClick={() => setCancelId(null)}>Voltar</button>
+              <button className="btn-primary" disabled={!cancelReason || (cancelReason === 'Outro' && !cancelNote.trim())} onClick={doCancel}>Cancelar marcação</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reschedId && (
+        <div className="notice-overlay">
+          <div className="notice-card" style={{ maxWidth: 380 }}>
+            <h2>Remarcar</h2>
+            <label className="fl">Nova data e hora</label>
+            <input type="datetime-local" value={newDate} onChange={e => setNewDate(e.target.value)} />
+            <div className="rec-nav">
+              <button className="btn-ghost" onClick={() => setReschedId(null)}>Voltar</button>
+              <button className="btn-primary" disabled={!newDate} onClick={doResched}>Guardar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {loading ? <p className="empty">A carregar…</p> : list.length === 0 ? (
+        <p className="empty">Sem marcações activas. Cria uma recepção com data de marcação para ela aparecer aqui.</p>
+      ) : (
+        <>
+          {late.length > 0 && (
+            <div className="booking-group">
+              <div className="booking-group-title late"><i className="ti ti-alert-circle" aria-hidden="true"></i> Em atraso / não compareceram ({late.length})</div>
+              {late.map(b => <Card key={b.id} b={b} kind="late" />)}
+            </div>
+          )}
+          {today.length > 0 && (
+            <div className="booking-group">
+              <div className="booking-group-title today"><i className="ti ti-calendar-due" aria-hidden="true"></i> Hoje ({today.length})</div>
+              {today.map(b => <Card key={b.id} b={b} kind="today" />)}
+            </div>
+          )}
+          {future.length > 0 && (
+            <div className="booking-group">
+              <div className="booking-group-title"><i className="ti ti-calendar" aria-hidden="true"></i> Próximas ({future.length})</div>
+              {future.map(b => <Card key={b.id} b={b} kind="future" />)}
+            </div>
+          )}
+        </>
       )}
     </main>
   )
