@@ -13,7 +13,9 @@ export async function api(path: string, opts: RequestInit = {}): Promise<any> {
     fetch(`${API}${path}`, {
       ...opts,
       headers: {
-        'Content-Type': 'application/json',
+        // Só anuncia JSON quando há mesmo um corpo — senão alguns servidores
+        // recusam com "Body cannot be empty when content-type is application/json".
+        ...(opts.body != null ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(opts.headers || {}),
       },

@@ -75,7 +75,7 @@ function Shell() {
   const canDo = useSession(s => s.can)
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
@@ -118,6 +118,7 @@ function Shell() {
           {!online && <span className="offline-pill">Offline{pending > 0 ? ` · ${pending}` : ''}</span>}
           {online && pending > 0 && <span className="sync-pill">A sincronizar {pending}…</span>}
           <span className="user-name">{user?.name}</span>
+          {isOwner && <button className="btn-ghost btn-sm" onClick={() => setView('errorlogs')} title="Diagnóstico do sistema"><i className="ti ti-bug" aria-hidden="true"></i></button>}
           <button className="btn-ghost btn-sm" onClick={logout}>Sair</button>
         </div>
       </header>
@@ -162,6 +163,7 @@ function Shell() {
       {view === 'bookings' && <Bookings onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} />}
       {view === 'os' && osId && <OrderService joId={osId} onBack={() => setView(osReturnTo)} myId={user?.id || ''} isOwner={isOwner} />}
       {view === 'authorizations' && <Authorizations onBack={() => setView('home')} onOpen={(id: string) => { setOsId(id); setOsReturnTo('authorizations'); setView('os') }} />}
+      {view === 'errorlogs' && <ErrorLogs onBack={() => setView('home')} />}
       {view === 'tasks' && <Tasks onBack={() => setView('home')} isOwner={isOwner} myId={user?.id || ''} />}
     </div>
   )
@@ -1553,6 +1555,43 @@ function ReceptionDetail({ joId, onBack, onResume, isOwner }: { joId: string; on
         <button className="btn-ghost danger" style={{ width: '100%', justifyContent: 'center', marginTop: 8 }} onClick={() => setShowDelForm(true)}>
           <i className="ti ti-trash" aria-hidden="true"></i> {isOwner ? 'Eliminar entrada' : 'Pedir eliminação'}
         </button>
+      )}
+    </main>
+  )
+}
+
+// ── LOGS DE ERRO (diagnóstico — só dono) ─────────────────────
+function ErrorLogs({ onBack }: { onBack: () => void }) {
+  const [list, setList] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const load = () => { setLoading(true); api('/api/v1/error-logs').then(r => setList(r.data || [])).catch(() => {}).finally(() => setLoading(false)) }
+  useEffect(() => { load() }, [])
+  const fmt = (s: string) => new Date(s).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+
+  return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
+        <h2 style={{ margin: 0, fontSize: 20 }}>Diagnóstico</h2>
+        <button className="btn-ghost btn-sm" onClick={load} title="Actualizar"><i className="ti ti-refresh" aria-hidden="true"></i></button>
+      </div>
+      <p className="hint" style={{ marginBottom: 14 }}>Erros técnicos recentes do sistema. Útil para diagnóstico. Guardam-se por tempo limitado e não contêm dados de clientes.</p>
+      {loading ? <p className="empty">A carregar…</p> : list.length === 0 ? (
+        <p className="empty">Sem erros registados. 🎉</p>
+      ) : (
+        <div className="log-list">
+          {list.map(e => (
+            <div key={e.id} className="log-row">
+              <div className="log-top">
+                <span className={`log-status s${Math.floor(e.status_code / 100)}`}>{e.status_code}</span>
+                <span className="log-route">{e.method} {e.route}</span>
+                <span className="log-time">{fmt(e.created_at)}</span>
+              </div>
+              <div className="log-msg">{e.message}</div>
+              {e.error_code && <div className="log-code">{e.error_code}</div>}
+            </div>
+          ))}
+        </div>
       )}
     </main>
   )
