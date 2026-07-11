@@ -467,3 +467,11 @@ textarea { resize: vertical; line-height: 1.55; }
   .os-badge.st-diagnosis_review, .os-review-box { background: rgba(245,158,11,.12); }
   .os-badge.st-awaiting_quote, .os-done-box { background: rgba(22,163,74,.15); }
 }
+
+/* ── Barra de progresso de upload ─────────────────────────── */
+.upload-bar { margin-top: 12px; height: 8px; background: var(--s2); border-radius: 4px; overflow: hidden; }
+.upload-bar-fill { height: 100%; background: var(--brand); border-radius: 4px; transition: width .3s ease; }
+.upload-hint { font-size: 12px; color: var(--ink-3); margin-top: 8px; text-align: center; }
+/* ── BI já conhecido ──────────────────────────────────────── */
+.bi-known { margin-top: 10px; padding: 10px 12px; background: #DCFCE7; border: 1px solid #86EFAC; border-radius: 8px; color: #15803D; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+@media (prefers-color-scheme: dark) { .bi-known { background: rgba(22,163,74,.15); } }

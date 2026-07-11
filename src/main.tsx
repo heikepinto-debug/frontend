@@ -209,6 +209,36 @@ const blobToBase64 = (b: Blob): Promise<string> => new Promise((res, rej) => {
   r.readAsDataURL(b)
 })
 
+// Comprime uma foto antes de enviar: redimensiona para no máx. 1600px no lado
+// maior e recomprime a JPEG 78%. Reduz ~90% do tamanho mantendo legível a
+// matrícula, as porcas e a referência da bateria. Se falhar, devolve o original.
+const compressImage = (blob: Blob, maxSide = 1600, quality = 0.78): Promise<Blob> =>
+  new Promise((resolve) => {
+    try {
+      const img = new Image()
+      const url = URL.createObjectURL(blob)
+      img.onload = () => {
+        URL.revokeObjectURL(url)
+        let { width, height } = img
+        if (width > maxSide || height > maxSide) {
+          if (width >= height) { height = Math.round(height * maxSide / width); width = maxSide }
+          else { width = Math.round(width * maxSide / height); height = maxSide }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width; canvas.height = height
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return resolve(blob)
+        ctx.drawImage(img, 0, 0, width, height)
+        canvas.toBlob(
+          (out) => resolve(out && out.size < blob.size ? out : blob),
+          'image/jpeg', quality
+        )
+      }
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(blob) }
+      img.src = url
+    } catch { resolve(blob) }
+  })
+
 // ── Validações refinadas (premium: ajudam, não bloqueiam à toa) ──
 const V = {
   // Telemóvel internacional: aceita qualquer país. Só exige dígitos suficientes.
@@ -265,6 +295,9 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   const [remapAccepted, setRemapAccepted] = useState(false)                  // cliente aceitou o aviso de remap/dyno
   const [signerIsOwner, setSignerIsOwner] = useState(true)                   // quem assina é o dono?
   const [signerName, setSignerName] = useState('')                          // nome de quem entregou (se não é o dono)
+  const [biNumber, setBiNumber] = useState('')                              // nº do BI de quem assina
+  const [biKnown, setBiKnown] = useState<null | { name: string }>(null)     // já temos este BI na base?
+  const [biChecking, setBiChecking] = useState(false)
 
   const [damages, setDamages] = useState<Damage[]>([])
   const [dmgGroup, setDmgGroup] = useState(0)
@@ -277,6 +310,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   const [tc, setTc] = useState([false, false, false])
   const [sigData, setSigData] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)  // barra de envio
   const [result, setResult] = useState<{ number: string; offline: boolean; joId?: string; draft?: boolean } | null>(null)
 
   const fileRef = useRef<HTMLInputElement>(null)
@@ -400,12 +434,24 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   const canNext = (): boolean => {
     switch (step) {
       case 0: return !!existingCust || (newCust && custName.trim().length >= 2 && V.phone(custPhone) && V.email(custEmail))
-      case 1: return !!existingVeh || (V.plate(plate) && V.year(vyear))
+      case 1: return !!existingVeh || (V.plate(plate) && V.year(vyear))  // ano opcional (V.year aceita vazio)
       case 2: return intentions.length >= 1
-      case 3: return valuables.trim().length > 0 && V.km(km)
+      case 3: return valuables.trim().length > 0 && V.km(km) && wantsOldParts !== null
       case 4: return true                       // danos são opcionais
       case 5: return totalReq >= REQ_TOTAL && batteryRef.trim().length > 0  // fotos + referência da bateria
-      case 6: return allTc && !!sigData && (!!existingCust || !!idDoc) && (!isRemapDyno || remapAccepted) && (signerIsOwner || signerName.trim().length >= 2)  // BI + aviso remap + nome de quem entrega
+      case 6: {
+        if (!allTc || !sigData) return false
+        if (isRemapDyno && !remapAccepted) return false
+        if (!signerIsOwner && signerName.trim().length < 2) return false
+        // identidade: precisa se é portador, ou se é dono mas cliente novo
+        const needsId = !signerIsOwner || (newCust && !existingCust)
+        if (needsId) {
+          if (biNumber.trim().length < 4) return false
+          // ou já temos o BI na base, ou temos foto nova
+          if (!biKnown && !idDoc) return false
+        }
+        return true
+      }
       default: return true
     }
   }
@@ -431,25 +477,45 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       termsAcceptedAt: new Date().toISOString(),
     }
     const allReq = [...REQ_ZONES, ...WHEEL_ZONES, BATTERY_ZONE, ...DASH_ZONES]   // 14 fotos obrigatórias
+    // conta total de envios para a barra de progresso (fotos + danos + BI)
+    const reqPhotos = allReq.filter(z => photos[z.key])
+    const damagePhotos = damages.filter(d => d.photo)
+    const totalUploads = reqPhotos.length + damagePhotos.length + (idDoc ? 1 : 0)
     try {
       if (!navigator.onLine) throw new Error('OFFLINE')
       const jo = await api('/api/v1/receptions', { method: 'POST', body: JSON.stringify(payload) })
-      for (const z of allReq)
-        if (photos[z.key]) await uploadPhoto(jo.id, z.key, photos[z.key], { isRequired: true, latitude: gps?.lat, longitude: gps?.lng })
-      for (const d of damages)
-        if (d.photo) await uploadPhoto(jo.id, `damage-${d.id}`, d.photo, { latitude: gps?.lat, longitude: gps?.lng })
+      let done = 0
+      setProgress({ done: 0, total: totalUploads })
+      for (const z of reqPhotos) {
+        const img = await compressImage(photos[z.key])
+        await uploadPhoto(jo.id, z.key, img, { isRequired: true, latitude: gps?.lat, longitude: gps?.lng })
+        setProgress({ done: ++done, total: totalUploads })
+      }
+      for (const d of damagePhotos) {
+        const img = await compressImage(d.photo!)
+        await uploadPhoto(jo.id, `damage-${d.id}`, img, { latitude: gps?.lat, longitude: gps?.lng })
+        setProgress({ done: ++done, total: totalUploads })
+      }
       if (idDoc) {
-        const b64 = await blobToBase64(idDoc)
+        const img = await compressImage(idDoc)
+        const b64 = await blobToBase64(img)
         await api(`/api/v1/receptions/${jo.id}/id-document`, {
-          method: 'POST', body: JSON.stringify({ imageBase64: b64 }),
+          method: 'POST', body: JSON.stringify({
+            imageBase64: b64,
+            biNumber: biNumber.trim() || undefined,
+            fullName: (signerIsOwner ? custName : signerName).trim() || undefined,
+          }),
         })
+        setProgress({ done: ++done, total: totalUploads })
       }
       if (sigData) await api(`/api/v1/receptions/${jo.id}/sign`, {
         method: 'POST', body: JSON.stringify({
           signatureBase64: sigData.split(',')[1],
           signerIsOwner, signerName: signerIsOwner ? undefined : (signerName || undefined),
+          signerBiNumber: biNumber || undefined,
         }),
       })
+      setProgress(null)
       setResult({ number: jo.number, offline: false, joId: jo.id })
     } catch {
       const offlineId = await offline.enqueueReception(payload)
@@ -458,6 +524,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       for (const d of damages)
         if (d.photo) await offline.savePhotoBlob(offlineId, `damage-${d.id}`, d.photo, {})
       if (idDoc) await offline.savePhotoBlob(offlineId, 'id-document', idDoc, {})
+      setProgress(null)
       setResult({ number: 'Pendente (offline)', offline: true })
     } finally { setBusy(false) }
   }
@@ -618,7 +685,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
                 <div><label className="fl">Marca</label><input value={brand} onChange={e => setBrand(e.target.value)} placeholder="ex: Subaru" /></div>
                 <div><label className="fl">Modelo</label><input value={model} onChange={e => setModel(e.target.value)} placeholder="ex: Impreza" /></div>
               </div>
-              <div style={{ marginTop: 14, maxWidth: 160 }}><label className="fl">Ano</label>
+              <div style={{ marginTop: 14, maxWidth: 160 }}><label className="fl">Ano (opcional)</label>
                 <input type="number" value={vyear} onChange={e => setVyear(e.target.value)} placeholder="2020" />
                 {!V.year(vyear) && <div className="field-warn">Ano inválido.</div>}</div>
             </>
@@ -726,8 +793,8 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
             ))}
           </div>
 
-          <label className="fl" style={{ marginTop: 22 }}>Peças antigas</label>
-          <p className="hint" style={{ marginTop: 0, marginBottom: 10 }}>O cliente quer ficar com as peças que forem substituídas?</p>
+          <label className="fl" style={{ marginTop: 22 }}>Peças antigas <span className="req">*</span></label>
+          <p className="hint" style={{ marginTop: 0, marginBottom: 10 }}>O cliente quer ficar com as peças que forem substituídas? (obrigatório — tem efeito legal)</p>
           <div className="seg">
             <button className={wantsOldParts === true ? 'on' : ''} onClick={() => setWantsOldParts(true)}>Sim, quer as peças</button>
             <button className={wantsOldParts === false ? 'on' : ''} onClick={() => setWantsOldParts(false)}>Não quer</button>
@@ -963,35 +1030,71 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
             </div>
           )}
 
-          {newCust && !existingCust && (
-            <>
-              <label className="fl" style={{ marginTop: 14 }}>Documento de identificação <span className="req">*</span></label>
-              <p className="hint" style={{ marginTop: 0, marginBottom: 8 }}>Foto do BI, passaporte ou carta do cliente — confirma a identidade de quem assina.</p>
-              <button className={`photo-slot km ${idDoc ? 'done' : ''}`} onClick={() => takePhoto('__iddoc__')}>
-                {idDoc ? <img src={URL.createObjectURL(idDoc)} alt="documento" /> : <span className="photo-icon"><i className="ti ti-id" aria-hidden="true"></i></span>}
-                <span>Documento</span>
-              </button>
-            </>
-          )}
           <label className="chk-inline" style={{ marginTop: 14 }}>
-            <input type="checkbox" checked={!signerIsOwner} onChange={e => setSignerIsOwner(!e.target.checked)} />
+            <input type="checkbox" checked={!signerIsOwner} onChange={e => { setSignerIsOwner(!e.target.checked); setBiNumber(''); setBiKnown(null); setIdDoc(null) }} />
             Quem assina não é o dono (trouxe o carro em nome dele)
           </label>
           {!signerIsOwner && (
             <>
               <label className="fl" style={{ marginTop: 10 }}>Nome de quem entrega o carro <span className="req">*</span></label>
-              <input value={signerName} onChange={e => setSignerName(e.target.value)} placeholder="Nome de quem trouxe o veículo" />
+              <input value={signerName} onChange={e => setSignerName(e.target.value)} placeholder="Nome e apelido de quem trouxe o veículo" />
               <p className="hint" style={{ marginTop: 6 }}>Esta pessoa verifica o registo consigo e assina, confirmando o estado de entrada em nome do dono.</p>
             </>
           )}
+
+          {/* Documento de identificação de quem assina — só se for preciso */}
+          {(!signerIsOwner || (newCust && !existingCust)) && (
+            <>
+              <label className="fl" style={{ marginTop: 14 }}>Nº do documento de {signerIsOwner ? 'identificação' : 'quem entrega'} <span className="req">*</span></label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input value={biNumber} style={{ flex: 1 }}
+                  onChange={e => { setBiNumber(e.target.value); setBiKnown(null) }}
+                  onBlur={async () => {
+                    const n = biNumber.trim()
+                    if (n.length < 4) return
+                    setBiChecking(true)
+                    try {
+                      const r = await api(`/api/v1/identity/${encodeURIComponent(n)}`)
+                      if (r.found && r.hasPhoto) { setBiKnown({ name: r.fullName }); setIdDoc(null) }
+                      else setBiKnown(null)
+                    } catch { setBiKnown(null) }
+                    finally { setBiChecking(false) }
+                  }}
+                  placeholder="Número do BI / passaporte" />
+              </div>
+              {biChecking && <p className="hint" style={{ marginTop: 6 }}>A verificar…</p>}
+              {biKnown ? (
+                <div className="bi-known"><i className="ti ti-circle-check" aria-hidden="true"></i> Já temos este documento{biKnown.name ? ` (${biKnown.name})` : ''} — não é preciso fotografar outra vez.</div>
+              ) : biNumber.trim().length >= 4 && (
+                <>
+                  <p className="hint" style={{ marginTop: 8, marginBottom: 8 }}>Documento novo — tire uma foto para o registarmos (só desta vez).</p>
+                  <button className={`photo-slot km ${idDoc ? 'done' : ''}`} onClick={() => takePhoto('__iddoc__')}>
+                    {idDoc ? <img src={URL.createObjectURL(idDoc)} alt="documento" /> : <span className="photo-icon"><i className="ti ti-id" aria-hidden="true"></i></span>}
+                    <span>Documento</span>
+                  </button>
+                </>
+              )}
+            </>
+          )}
+
           <label className="fl" style={{ marginTop: 14 }}>Assinatura {signerIsOwner ? 'do cliente' : 'de quem entrega'} <span className="req">*</span></label>
           <SignaturePad onChange={setSigData} />
           <div className="rec-nav">
-            <button className="btn-ghost" onClick={() => setReviewed(false)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
+            <button className="btn-ghost" onClick={() => setReviewed(false)} disabled={busy}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
             <button className="btn-primary" disabled={!canNext() || busy} onClick={submit}>
-              {busy ? 'A finalizar…' : <>Finalizar <i className="ti ti-check" aria-hidden="true"></i></>}
+              {busy
+                ? (progress ? `A enviar ${progress.done}/${progress.total}…` : 'A preparar…')
+                : <>Finalizar <i className="ti ti-check" aria-hidden="true"></i></>}
             </button>
           </div>
+          {busy && progress && progress.total > 0 && (
+            <div className="upload-bar">
+              <div className="upload-bar-fill" style={{ width: `${Math.round(progress.done / progress.total * 100)}%` }} />
+            </div>
+          )}
+          {busy && progress && (
+            <p className="upload-hint">A enviar fotografias… não feches a aplicação. {progress.done} de {progress.total}.</p>
+          )}
         </section>
       )}
     </main>
