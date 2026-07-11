@@ -322,6 +322,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   const [sigData, setSigData] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)  // barra de envio
+  const [compsize, setCompsize] = useState<{ before: number; after: number } | null>(null)  // diagnóstico de compressão
   const [result, setResult] = useState<{ number: string; offline: boolean; joId?: string; draft?: boolean } | null>(null)
 
   const fileRef = useRef<HTMLInputElement>(null)
@@ -496,9 +497,12 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       if (!navigator.onLine) throw new Error('OFFLINE')
       const jo = await api('/api/v1/receptions', { method: 'POST', body: JSON.stringify(payload) })
       let done = 0
+      let totalBefore = 0, totalAfter = 0
       setProgress({ done: 0, total: totalUploads })
       for (const z of reqPhotos) {
         const img = await compressImage(photos[z.key])
+        totalBefore += photos[z.key].size; totalAfter += img.size
+        setCompsize({ before: totalBefore, after: totalAfter })
         await uploadPhoto(jo.id, z.key, img, { isRequired: true, latitude: gps?.lat, longitude: gps?.lng })
         setProgress({ done: ++done, total: totalUploads })
       }
@@ -1104,7 +1108,8 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
             </div>
           )}
           {busy && progress && (
-            <p className="upload-hint">A enviar fotografias… não feches a aplicação. {progress.done} de {progress.total}.</p>
+            <p className="upload-hint">A enviar fotografias… não feches a aplicação. {progress.done} de {progress.total}.
+            {compsize && compsize.before > 0 && ` · Compressão: ${(compsize.before/1048576).toFixed(1)}MB → ${(compsize.after/1048576).toFixed(1)}MB (${Math.round((1-compsize.after/compsize.before)*100)}% menor)`}</p>
           )}
         </section>
       )}
@@ -1740,12 +1745,14 @@ function OrderService({ joId, onBack, myId, isOwner }: { joId: string; onBack: (
   const [rejectNote, setRejectNote] = useState('')
   const [photoView, setPhotoView] = useState<string | null>(null)
 
+  const [loadError, setLoadError] = useState<string | null>(null)
   const load = () => {
-    setLoading(true)
+    setLoading(true); setLoadError(null)
     api(`/api/v1/os/${joId}`).then(r => {
+      if (r.error) { setLoadError(r.error); return }
       setData(r)
       if (r.jo?.diagnosis_notes) setNotes(r.jo.diagnosis_notes)
-    }).catch(() => {}).finally(() => setLoading(false))
+    }).catch((e: any) => setLoadError(e?.message || 'Erro de ligação')).finally(() => setLoading(false))
   }
   useEffect(() => { load() }, [joId])
 
@@ -1763,9 +1770,23 @@ function OrderService({ joId, onBack, myId, isOwner }: { joId: string; onBack: (
   const authOn = data?.diagAuthorizationOn
   const iSubmitted = jo?.diag_submitted_by === myId
 
+  const errorScreen = (msg: string) => (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Recepções</button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Ordem de Serviço</h2><span />
+      </div>
+      <p className="empty">{msg}</p>
+      <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 8 }} onClick={load}>
+        <i className="ti ti-refresh" aria-hidden="true"></i> Tentar de novo
+      </button>
+    </main>
+  )
+
   // não iniciada ainda
   if (loading) return <main className="reception"><p className="empty">A carregar…</p></main>
-  if (!jo) return <main className="reception"><p className="empty">Não foi possível carregar.</p></main>
+  if (loadError) return errorScreen(`Não foi possível carregar: ${loadError}`)
+  if (!jo) return errorScreen('Não foi possível carregar a Ordem de Serviço.')
 
   if (!jo.os_opened_at) {
     return (
