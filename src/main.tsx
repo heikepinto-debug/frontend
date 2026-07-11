@@ -75,9 +75,10 @@ function Shell() {
   const canDo = useSession(s => s.can)
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
+  const [osId, setOsId] = useState<string | undefined>(undefined)
   const [bookingCount, setBookingCount] = useState(0)
   const isOwner = canDo('jobdelete:any')
 
@@ -146,9 +147,10 @@ function Shell() {
         </main>
       )}
       {view === 'reception' && <Reception key={resumeDraftId || 'new'} resumeDraftId={resumeDraftId} onDone={() => { setResumeDraftId(undefined); setView('list') }} onBack={() => { setResumeDraftId(undefined); setView('home') }} />}
-      {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} />}
+      {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setView('os') }} />}
       {view === 'detail' && detailId && <ReceptionDetail joId={detailId} onBack={() => setView('list')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} isOwner={isOwner} />}
       {view === 'bookings' && <Bookings onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} />}
+      {view === 'os' && osId && <OrderService joId={osId} onBack={() => setView('list')} myId={user?.id || ''} isOwner={isOwner} />}
       {view === 'tasks' && <Tasks onBack={() => setView('home')} isOwner={isOwner} myId={user?.id || ''} />}
     </div>
   )
@@ -1053,7 +1055,7 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: 'Cancelado',
 }
 
-function ReceptionList({ onBack, onResume, onOpen, isOwner }: { onBack: () => void; onResume: (id: string) => void; onOpen: (id: string) => void; isOwner: boolean }) {
+function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS }: { onBack: () => void; onResume: (id: string) => void; onOpen: (id: string) => void; isOwner: boolean; onOpenOS?: (id: string) => void }) {
   const canDelete = useSession(s => s.can('jobdelete:any'))
   const canStatus = useSession(s => s.can('jobdelete:any'))   // mudar estado: só dono, nesta fase
   const [rows, setRows] = useState<any[]>([])
@@ -1104,6 +1106,16 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner }: { onBack: () => vo
     } catch { alert('Não foi possível mudar o estado.') }
   }
 
+  // Atalho temporário (só dono): fechar um carro que já saiu, sem passar
+  // por todas as fases que ainda não existem no sistema.
+  const markDelivered = async (jo: any) => {
+    if (!confirm(`Marcar ${jo.number} como finalizada/entregue?\n\nUsa isto para fechar carros já tratados enquanto o ciclo completo não está pronto.`)) return
+    try {
+      await api(`/api/v1/receptions/${jo.id}/status`, { method: 'POST', body: JSON.stringify({ status: 'delivered' }) })
+      setRows(rs => rs.map(r => r.id === jo.id ? { ...r, status: 'delivered' } : r))
+    } catch { alert('Não foi possível finalizar.') }
+  }
+
   return (
     <main className="reception">
       <div className="rec-top" style={{ marginBottom: 16 }}>
@@ -1141,6 +1153,11 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner }: { onBack: () => vo
                   Continuar <i className="ti ti-arrow-right" aria-hidden="true"></i>
                 </button>
               )}
+              {!isDraft && r.signed_at && onOpenOS && (
+                r.os_opened_at
+                  ? <button className="btn-ghost btn-sm" onClick={() => onOpenOS(r.id)} title="Ver Ordem de Serviço"><i className="ti ti-clipboard-list" aria-hidden="true"></i> Ver OS</button>
+                  : <button className="btn-primary btn-sm" onClick={() => onOpenOS(r.id)} title="Iniciar Ordem de Serviço"><i className="ti ti-tools" aria-hidden="true"></i> Iniciar OS</button>
+              )}
               {!isDraft && r.signed_at && (
                 <button className="btn-ghost btn-sm" disabled={pdfBusy === r.id} onClick={() => exportPdf(r.id)} title="Exportar PDF de entrada">
                   <i className={`ti ${pdfBusy === r.id ? 'ti-loader' : 'ti-file-type-pdf'}`} aria-hidden="true"></i>
@@ -1149,6 +1166,11 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner }: { onBack: () => vo
               {!isDraft && canStatus && (
                 <button className="btn-ghost btn-sm" onClick={() => changeStatus(r)} title="Mudar estado">
                   <i className="ti ti-adjustments" aria-hidden="true"></i>
+                </button>
+              )}
+              {!isDraft && canStatus && r.status !== 'delivered' && (
+                <button className="btn-ghost btn-sm" onClick={() => markDelivered(r)} title="Marcar como finalizada">
+                  <i className="ti ti-checkbox" aria-hidden="true"></i>
                 </button>
               )}
               {canDelete && (
@@ -1533,6 +1555,238 @@ function Bookings({ onBack, onResume }: { onBack: () => void; onResume: (id: str
             </div>
           )}
         </>
+      )}
+    </main>
+  )
+}
+
+// ── ORDEM DE SERVIÇO — Fatia 1: Diagnóstico ──────────────────
+function OrderService({ joId, onBack, myId, isOwner }: { joId: string; onBack: () => void; myId: string; isOwner: boolean }) {
+  const [data, setData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [starting, setStarting] = useState(false)
+  const [newProblem, setNewProblem] = useState('')
+  const [notes, setNotes] = useState('')
+  const [showAuth, setShowAuth] = useState(false)
+  const [authSig, setAuthSig] = useState<string | null>(null)
+  const [rejecting, setRejecting] = useState(false)
+  const [rejectNote, setRejectNote] = useState('')
+  const [photoView, setPhotoView] = useState<string | null>(null)
+
+  const load = () => {
+    setLoading(true)
+    api(`/api/v1/os/${joId}`).then(r => {
+      setData(r)
+      if (r.jo?.diagnosis_notes) setNotes(r.jo.diagnosis_notes)
+    }).catch(() => {}).finally(() => setLoading(false))
+  }
+  useEffect(() => { load() }, [joId])
+
+  const startOS = async () => {
+    setStarting(true)
+    try { await api(`/api/v1/os/start/${joId}`, { method: 'POST' }); load() }
+    catch (e: any) { alert(e?.message || 'Não foi possível iniciar a OS.') }
+    finally { setStarting(false) }
+  }
+
+  const jo = data?.jo
+  const problems = data?.problems || []
+  const isDiag = jo?.status === 'in_diagnosis'
+  const isReview = jo?.status === 'diagnosis_review'
+  const authOn = data?.diagAuthorizationOn
+  const iSubmitted = jo?.diag_submitted_by === myId
+
+  // não iniciada ainda
+  if (loading) return <main className="reception"><p className="empty">A carregar…</p></main>
+  if (!jo) return <main className="reception"><p className="empty">Não foi possível carregar.</p></main>
+
+  if (!jo.os_opened_at) {
+    return (
+      <main className="reception">
+        <div className="rec-top" style={{ marginBottom: 16 }}>
+          <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Recepções</button>
+          <h2 style={{ margin: 0, fontSize: 18 }}>{jo.number}</h2><span />
+        </div>
+        <div className="os-start-card">
+          <div className="os-start-ic"><i className="ti ti-tools" aria-hidden="true"></i></div>
+          <h2>Iniciar Ordem de Serviço</h2>
+          <p>Ao iniciar, começa o registo do trabalho neste carro ({jo.brand} {jo.model} · {jo.plate}). As queixas do cliente entram automaticamente na lista de problemas para diagnóstico.</p>
+          <button className="btn-primary" style={{ justifyContent: 'center' }} disabled={starting} onClick={startOS}>
+            {starting ? 'A iniciar…' : 'Iniciar OS e começar diagnóstico'}
+          </button>
+        </div>
+      </main>
+    )
+  }
+
+  const addProblem = async () => {
+    if (newProblem.trim().length < 2) return
+    try { await api(`/api/v1/os/${joId}/problems`, { method: 'POST', body: JSON.stringify({ description: newProblem, origin: 'team' }) }); setNewProblem(''); load() }
+    catch { alert('Não foi possível adicionar.') }
+  }
+  const updateProblem = async (pid: string, fields: any) => {
+    try { await api(`/api/v1/os/problems/${pid}`, { method: 'POST', body: JSON.stringify(fields) }); load() }
+    catch { alert('Erro ao actualizar.') }
+  }
+  const deleteProblem = async (pid: string) => {
+    if (!confirm('Apagar este problema?')) return
+    try { await api(`/api/v1/os/problems/${pid}`, { method: 'DELETE' }); load() } catch { alert('Erro.') }
+  }
+  const addPhoto = async (pid: string) => {
+    const input = document.createElement('input')
+    input.type = 'file'; input.accept = 'image/*'; (input as any).capture = 'environment'
+    input.onchange = async () => {
+      const f = input.files?.[0]; if (!f) return
+      const ext = (f.name.split('.').pop() || 'jpg')
+      try {
+        const r = await api(`/api/v1/os/problems/${pid}/photo-url`, { method: 'POST', body: JSON.stringify({ ext }) })
+        await fetch(r.uploadUrl, { method: 'PUT', body: f, headers: { 'Content-Type': f.type } })
+        load()
+      } catch { alert('Não foi possível anexar a foto.') }
+    }
+    input.click()
+  }
+  const submitDiagnosis = async () => {
+    try {
+      const r = await api(`/api/v1/os/${joId}/submit-diagnosis`, { method: 'POST', body: JSON.stringify({ notes: notes || undefined }) })
+      alert(r.status === 'diagnosis_review' ? 'Diagnóstico submetido para autorização.' : 'Diagnóstico concluído. OS pronta para orçamento.')
+      load()
+    } catch (e: any) { alert(e?.message || 'Não foi possível submeter.') }
+  }
+  const authorize = async () => {
+    if (!authSig) return
+    try { await api(`/api/v1/os/${joId}/authorize-diagnosis`, { method: 'POST', body: JSON.stringify({ approve: true, signature: authSig }) }); setShowAuth(false); load() }
+    catch (e: any) { alert(e?.message || 'Erro ao autorizar.') }
+  }
+  const reject = async () => {
+    if (!rejectNote.trim()) return
+    try { await api(`/api/v1/os/${joId}/authorize-diagnosis`, { method: 'POST', body: JSON.stringify({ approve: false, note: rejectNote }) }); setRejecting(false); setRejectNote(''); load() }
+    catch (e: any) { alert(e?.message || 'Erro.') }
+  }
+
+  return (
+    <main className="reception">
+      {photoView && (
+        <div className="photo-viewer" onClick={() => setPhotoView(null)}>
+          <img src={photoView} alt="evidência" />
+          <button className="photo-viewer-close"><i className="ti ti-x" aria-hidden="true"></i></button>
+        </div>
+      )}
+
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Recepções</button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>OS {jo.number}</h2><span />
+      </div>
+
+      <div className="os-status-bar">
+        <span className="os-veh">{jo.brand} {jo.model} · {jo.plate}</span>
+        <span className={`os-badge st-${jo.status}`}>
+          {jo.status === 'in_diagnosis' ? 'Em diagnóstico' : jo.status === 'diagnosis_review' ? 'Aguarda autorização' : jo.status === 'awaiting_quote' ? 'Diagnóstico concluído' : jo.status}
+        </span>
+      </div>
+
+      {jo.diag_rejected_note && isDiag && (
+        <div className="os-reject-note"><i className="ti ti-alert-triangle" aria-hidden="true"></i> Diagnóstico devolvido: {jo.diag_rejected_note}</div>
+      )}
+
+      <div className="det-section-title" style={{ marginTop: 18 }}>Lista de problemas</div>
+      <div className="prob-list">
+        {problems.map((p: any) => (
+          <div key={p.id} className="prob-card">
+            <div className="prob-head">
+              <span className={`prob-origin o-${p.origin}`}>{p.origin === 'customer' ? 'Cliente' : 'Equipa'}</span>
+              <span className="prob-desc">{p.description}</span>
+              {isDiag && <button className="prob-x" onClick={() => deleteProblem(p.id)}><i className="ti ti-x" aria-hidden="true"></i></button>}
+            </div>
+            {isDiag ? (
+              <textarea className="prob-diag" placeholder="Diagnóstico: o que se concluiu…" defaultValue={p.diagnosis || ''}
+                onBlur={e => { if (e.target.value !== (p.diagnosis || '')) updateProblem(p.id, { diagnosis: e.target.value }) }} rows={2} />
+            ) : p.diagnosis ? <div className="prob-diag-view">{p.diagnosis}</div> : <div className="prob-diag-empty">Sem diagnóstico registado</div>}
+            <div className="prob-photos">
+              {(p.photos || []).map((ph: any) => ph.url && (
+                <div key={ph.id} className="prob-photo" onClick={() => setPhotoView(ph.url)}><img src={ph.url} alt="evidência" /></div>
+              ))}
+              {isDiag && <button className="prob-add-photo" onClick={() => addPhoto(p.id)}><i className="ti ti-camera" aria-hidden="true"></i></button>}
+            </div>
+          </div>
+        ))}
+        {problems.length === 0 && <p className="empty">Sem problemas na lista.</p>}
+      </div>
+
+      {isDiag && (
+        <>
+          <div className="prob-add">
+            <input value={newProblem} onChange={e => setNewProblem(e.target.value)} placeholder="Acrescentar problema detectado pela equipa…"
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addProblem() } }} />
+            <button className="btn-primary" onClick={addProblem} disabled={newProblem.trim().length < 2}><i className="ti ti-plus" aria-hidden="true"></i></button>
+          </div>
+          <label className="fl" style={{ marginTop: 16 }}>Notas gerais do diagnóstico (opcional)</label>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Observações gerais…" />
+          <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 16 }} onClick={submitDiagnosis} disabled={problems.length === 0}>
+            {authOn ? 'Submeter diagnóstico para autorização' : 'Concluir diagnóstico'}
+          </button>
+        </>
+      )}
+
+      {isReview && (
+        <div className="os-review-box">
+          <div className="os-review-head"><i className="ti ti-clipboard-check" aria-hidden="true"></i> Diagnóstico aguarda autorização</div>
+          <p className="det-notes">Submetido por {jo.diag_submitted_by_name}. {authOn && 'A autorização assume a responsabilidade técnica partilhada pelo diagnóstico.'}</p>
+          {iSubmitted ? (
+            <p className="det-empty">Não podes autorizar o teu próprio diagnóstico. Aguarda a autorização do responsável.</p>
+          ) : !showAuth && !rejecting ? (
+            <div className="rec-nav">
+              <button className="btn-ghost danger" onClick={() => setRejecting(true)}>Recusar</button>
+              <button className="btn-primary" onClick={() => setShowAuth(true)}>Autorizar</button>
+            </div>
+          ) : rejecting ? (
+            <div style={{ marginTop: 12 }}>
+              <label className="fl">Motivo da recusa <span className="req">*</span></label>
+              <input value={rejectNote} onChange={e => setRejectNote(e.target.value)} placeholder="ex: faltou verificar o turbo" />
+              <div className="rec-nav">
+                <button className="btn-ghost" onClick={() => setRejecting(false)}>Voltar</button>
+                <button className="btn-primary" disabled={!rejectNote.trim()} onClick={reject}>Devolver ao diagnóstico</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ marginTop: 12 }}>
+              <div className="os-auth-notice">
+                Ao assinar, assumo a responsabilidade técnica partilhada por este diagnóstico, nos termos das minhas funções.
+              </div>
+              <label className="fl" style={{ marginTop: 10 }}>Assinatura <span className="req">*</span></label>
+              <SignaturePad onChange={setAuthSig} />
+              <div className="rec-nav">
+                <button className="btn-ghost" onClick={() => setShowAuth(false)}>Voltar</button>
+                <button className="btn-primary" disabled={!authSig} onClick={authorize}>Autorizar diagnóstico</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {jo.status === 'awaiting_quote' && (
+        <div className="os-done-box">
+          <i className="ti ti-circle-check-filled" aria-hidden="true"></i>
+          <div>
+            <strong>Diagnóstico concluído.</strong>
+            <p>{jo.diag_authorized_by_name ? `Autorizado por ${jo.diag_authorized_by_name}.` : ''} A OS está pronta para a fase de orçamento (próxima fatia).</p>
+          </div>
+        </div>
+      )}
+
+      {isOwner && jo.status !== 'delivered' && (
+        <button className="btn-ghost" style={{ width: '100%', justifyContent: 'center', marginTop: 12 }}
+          onClick={async () => {
+            if (!confirm(`Marcar ${jo.number} como finalizada/entregue?\n\nAtalho temporário para fechar carros já tratados enquanto o ciclo completo não está pronto.`)) return
+            try { await api(`/api/v1/receptions/${joId}/status`, { method: 'POST', body: JSON.stringify({ status: 'delivered' }) }); load() }
+            catch { alert('Não foi possível finalizar.') }
+          }}>
+          <i className="ti ti-checkbox" aria-hidden="true"></i> Marcar como finalizada
+        </button>
+      )}
+
+      {jo.status === 'delivered' && (
+        <div className="os-done-box"><i className="ti ti-flag-check" aria-hidden="true"></i><div><strong>Finalizada / entregue.</strong></div></div>
       )}
     </main>
   )

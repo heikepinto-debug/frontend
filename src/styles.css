@@ -424,3 +424,46 @@ textarea { resize: vertical; line-height: 1.55; }
   .wbadge.imp { background: rgba(194,65,12,.2); }
   .wbadge.pers { background: rgba(67,56,202,.2); }
 }
+
+/* ── Ordem de Serviço ─────────────────────────────────────── */
+.os-start-card { background: var(--s2); border: 1px solid var(--line); border-radius: var(--radius); padding: 30px 24px; text-align: center; margin-top: 30px; }
+.os-start-ic { width: 64px; height: 64px; border-radius: 16px; background: var(--brand-bg); color: var(--brand); display: flex; align-items: center; justify-content: center; font-size: 32px; margin: 0 auto 18px; }
+.os-start-card h2 { font-size: 20px; margin-bottom: 12px; }
+.os-start-card p { font-size: 14px; color: var(--ink-2); line-height: 1.6; margin-bottom: 20px; }
+.os-start-card .btn-primary { width: 100%; }
+.os-status-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; background: var(--s2); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.os-veh { font-size: 14px; font-weight: 600; color: var(--ink); }
+.os-badge { font-size: 12px; font-weight: 600; padding: 4px 11px; border-radius: 20px; }
+.os-badge.st-in_diagnosis { background: #E0E7FF; color: #4338CA; }
+.os-badge.st-diagnosis_review { background: #FEF3C7; color: #B45309; }
+.os-badge.st-awaiting_quote { background: #DCFCE7; color: #15803D; }
+.os-reject-note { margin-top: 12px; padding: 12px 14px; background: var(--danger-bg); border: 1px solid var(--danger); border-radius: var(--radius-sm); color: var(--danger); font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.prob-list { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.prob-card { background: var(--s1); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
+.prob-head { display: flex; align-items: center; gap: 8px; }
+.prob-origin { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 10px; flex-shrink: 0; }
+.prob-origin.o-customer { background: #E0E7FF; color: #4338CA; }
+.prob-origin.o-team { background: #FFEDD5; color: #C2410C; }
+.prob-desc { flex: 1; font-size: 14px; font-weight: 600; color: var(--ink); }
+.prob-x { background: none; border: none; color: var(--ink-3); cursor: pointer; padding: 4px; }
+.prob-diag { width: 100%; margin-top: 10px; font-size: 13px; }
+.prob-diag-view { margin-top: 8px; font-size: 13px; color: var(--ink-2); background: var(--s2); padding: 8px 10px; border-radius: 8px; }
+.prob-diag-empty { margin-top: 8px; font-size: 12px; color: var(--ink-3); font-style: italic; }
+.prob-photos { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.prob-photo { width: 54px; height: 54px; border-radius: 8px; overflow: hidden; cursor: pointer; }
+.prob-photo img { width: 100%; height: 100%; object-fit: cover; }
+.prob-add-photo { width: 54px; height: 54px; border-radius: 8px; border: 1px dashed var(--line-2); background: var(--s2); color: var(--ink-3); cursor: pointer; font-size: 18px; }
+.prob-add { display: flex; gap: 8px; margin-top: 12px; }
+.prob-add input { flex: 1; }
+.os-review-box { margin-top: 18px; padding: 16px; background: #FFFBEB; border: 1px solid #F59E0B; border-radius: var(--radius); }
+.os-review-head { font-weight: 700; color: #B45309; font-size: 15px; display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.os-auth-notice { background: var(--s2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+.os-done-box { margin-top: 18px; padding: 16px; background: #DCFCE7; border: 1px solid #16A34A; border-radius: var(--radius); display: flex; gap: 12px; align-items: flex-start; color: #15803D; }
+.os-done-box i { font-size: 24px; flex-shrink: 0; }
+.os-done-box strong { font-size: 15px; }
+.os-done-box p { font-size: 13px; margin-top: 3px; }
+@media (prefers-color-scheme: dark) {
+  .os-badge.st-in_diagnosis { background: rgba(67,56,202,.2); }
+  .os-badge.st-diagnosis_review, .os-review-box { background: rgba(245,158,11,.12); }
+  .os-badge.st-awaiting_quote, .os-done-box { background: rgba(22,163,74,.15); }
+}
