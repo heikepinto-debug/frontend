@@ -475,3 +475,11 @@ textarea { resize: vertical; line-height: 1.55; }
 /* ── BI já conhecido ──────────────────────────────────────── */
 .bi-known { margin-top: 10px; padding: 10px 12px; background: #DCFCE7; border: 1px solid #86EFAC; border-radius: 8px; color: #15803D; font-size: 13px; display: flex; align-items: center; gap: 8px; }
 @media (prefers-color-scheme: dark) { .bi-known { background: rgba(22,163,74,.15); } }
+
+/* ── Autorizações (cartão do Edgar) ───────────────────────── */
+.auth-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 14px; background: var(--s1); border: 1px solid var(--line); border-left: 3px solid #F59E0B; border-radius: var(--radius); cursor: pointer; }
+.auth-main { flex: 1; min-width: 0; }
+.auth-veh { font-size: 14px; font-weight: 600; color: var(--ink); }
+.auth-sub { font-size: 13px; color: var(--ink-2); margin-top: 2px; }
+.auth-meta { font-size: 12px; color: var(--ink-3); margin-top: 3px; }
+.auth-arrow { color: var(--ink-3); font-size: 18px; flex-shrink: 0; }

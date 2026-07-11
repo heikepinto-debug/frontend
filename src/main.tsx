@@ -75,11 +75,13 @@ function Shell() {
   const canDo = useSession(s => s.can)
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
+  const [osReturnTo, setOsReturnTo] = useState<'list' | 'authorizations'>('list')
   const [bookingCount, setBookingCount] = useState(0)
+  const [authCount, setAuthCount] = useState(0)
   const isOwner = canDo('jobdelete:any')
 
   useEffect(() => {
@@ -98,6 +100,7 @@ function Shell() {
         const relevant = (r.data || []).filter((b: any) => new Date(b.booking_date) <= now)
         setBookingCount(relevant.length)
       }).catch(() => {})
+      api('/api/v1/os/awaiting-authorization').then(r => setAuthCount((r.data || []).length)).catch(() => {})
     }
   }, [view])
 
@@ -133,6 +136,13 @@ function Shell() {
               <span className="action-title">Recepções</span>
               <span className="action-sub">Ver ordens de trabalho criadas</span>
             </button>
+            {authCount > 0 && (
+              <button className="action-card" onClick={() => setView('authorizations')}>
+                <div className="action-ic"><i className="ti ti-clipboard-check" aria-hidden="true"></i><span className="card-badge">{authCount}</span></div>
+                <span className="action-title">Autorizações</span>
+                <span className="action-sub">{authCount} diagnóstico{authCount > 1 ? 's' : ''} à espera de si</span>
+              </button>
+            )}
             <button className="action-card" onClick={() => setView('bookings')}>
               <div className="action-ic"><i className="ti ti-calendar-event" aria-hidden="true"></i>{bookingCount > 0 && <span className="card-badge">{bookingCount}</span>}</div>
               <span className="action-title">Marcações</span>
@@ -147,10 +157,11 @@ function Shell() {
         </main>
       )}
       {view === 'reception' && <Reception key={resumeDraftId || 'new'} resumeDraftId={resumeDraftId} onDone={() => { setResumeDraftId(undefined); setView('list') }} onBack={() => { setResumeDraftId(undefined); setView('home') }} />}
-      {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setView('os') }} />}
+      {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }} />}
       {view === 'detail' && detailId && <ReceptionDetail joId={detailId} onBack={() => setView('list')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} isOwner={isOwner} />}
       {view === 'bookings' && <Bookings onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} />}
-      {view === 'os' && osId && <OrderService joId={osId} onBack={() => setView('list')} myId={user?.id || ''} isOwner={isOwner} />}
+      {view === 'os' && osId && <OrderService joId={osId} onBack={() => setView(osReturnTo)} myId={user?.id || ''} isOwner={isOwner} />}
+      {view === 'authorizations' && <Authorizations onBack={() => setView('home')} onOpen={(id: string) => { setOsId(id); setOsReturnTo('authorizations'); setView('os') }} />}
       {view === 'tasks' && <Tasks onBack={() => setView('home')} isOwner={isOwner} myId={user?.id || ''} />}
     </div>
   )
@@ -1532,6 +1543,42 @@ function ReceptionDetail({ joId, onBack, onResume, isOwner }: { joId: string; on
         <button className="btn-ghost danger" style={{ width: '100%', justifyContent: 'center', marginTop: 8 }} onClick={() => setShowDelForm(true)}>
           <i className="ti ti-trash" aria-hidden="true"></i> {isOwner ? 'Eliminar entrada' : 'Pedir eliminação'}
         </button>
+      )}
+    </main>
+  )
+}
+
+// ── AUTORIZAÇÕES (cartão do autorizador — ex: Edgar) ─────────
+function Authorizations({ onBack, onOpen }: { onBack: () => void; onOpen: (id: string) => void }) {
+  const [list, setList] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    api('/api/v1/os/awaiting-authorization').then(r => setList(r.data || [])).catch(() => {}).finally(() => setLoading(false))
+  }, [])
+  const fmt = (s: string) => s ? new Date(s).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''
+
+  return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
+        <h2 style={{ margin: 0, fontSize: 20 }}>Autorizações</h2><span />
+      </div>
+      <p className="hint" style={{ marginBottom: 14 }}>Diagnósticos submetidos que aguardam a sua autorização. Ao autorizar, assume a responsabilidade técnica partilhada.</p>
+      {loading ? <p className="empty">A carregar…</p> : list.length === 0 ? (
+        <p className="empty">Nenhum diagnóstico à espera de si.</p>
+      ) : (
+        <div className="prob-list">
+          {list.map(o => (
+            <button key={o.id} className="auth-row" onClick={() => onOpen(o.id)}>
+              <div className="auth-main">
+                <div className="auth-veh">{o.brand} {o.model} · {o.plate}</div>
+                <div className="auth-sub">{o.customer_name} · OS {o.number}</div>
+                <div className="auth-meta">Submetido por {o.submitted_by_name}{o.diag_submitted_at ? ` · ${fmt(o.diag_submitted_at)}` : ''}</div>
+              </div>
+              <i className="ti ti-arrow-right auth-arrow" aria-hidden="true"></i>
+            </button>
+          ))}
+        </div>
       )}
     </main>
   )
