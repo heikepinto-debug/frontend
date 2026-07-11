@@ -263,6 +263,8 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   const [wantsOldParts, setWantsOldParts] = useState<boolean | null>(null)   // quer as peças antigas
   const [showDiagNotice, setShowDiagNotice] = useState(false)                // pop-up do dever de diagnóstico
   const [remapAccepted, setRemapAccepted] = useState(false)                  // cliente aceitou o aviso de remap/dyno
+  const [signerIsOwner, setSignerIsOwner] = useState(true)                   // quem assina é o dono?
+  const [signerName, setSignerName] = useState('')                          // nome de quem entregou (se não é o dono)
 
   const [damages, setDamages] = useState<Damage[]>([])
   const [dmgGroup, setDmgGroup] = useState(0)
@@ -403,7 +405,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       case 3: return valuables.trim().length > 0 && V.km(km)
       case 4: return true                       // danos são opcionais
       case 5: return totalReq >= REQ_TOTAL && batteryRef.trim().length > 0  // fotos + referência da bateria
-      case 6: return allTc && !!sigData && (!!existingCust || !!idDoc) && (!isRemapDyno || remapAccepted)  // BI + aviso remap
+      case 6: return allTc && !!sigData && (!!existingCust || !!idDoc) && (!isRemapDyno || remapAccepted) && (signerIsOwner || signerName.trim().length >= 2)  // BI + aviso remap + nome de quem entrega
       default: return true
     }
   }
@@ -443,7 +445,10 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
         })
       }
       if (sigData) await api(`/api/v1/receptions/${jo.id}/sign`, {
-        method: 'POST', body: JSON.stringify({ signatureBase64: sigData.split(',')[1] }),
+        method: 'POST', body: JSON.stringify({
+          signatureBase64: sigData.split(',')[1],
+          signerIsOwner, signerName: signerIsOwner ? undefined : (signerName || undefined),
+        }),
       })
       setResult({ number: jo.number, offline: false, joId: jo.id })
     } catch {
@@ -968,7 +973,18 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
               </button>
             </>
           )}
-          <label className="fl" style={{ marginTop: 14 }}>Assinatura do cliente <span className="req">*</span></label>
+          <label className="chk-inline" style={{ marginTop: 14 }}>
+            <input type="checkbox" checked={!signerIsOwner} onChange={e => setSignerIsOwner(!e.target.checked)} />
+            Quem assina não é o dono (trouxe o carro em nome dele)
+          </label>
+          {!signerIsOwner && (
+            <>
+              <label className="fl" style={{ marginTop: 10 }}>Nome de quem entrega o carro <span className="req">*</span></label>
+              <input value={signerName} onChange={e => setSignerName(e.target.value)} placeholder="Nome de quem trouxe o veículo" />
+              <p className="hint" style={{ marginTop: 6 }}>Esta pessoa verifica o registo consigo e assina, confirmando o estado de entrada em nome do dono.</p>
+            </>
+          )}
+          <label className="fl" style={{ marginTop: 14 }}>Assinatura {signerIsOwner ? 'do cliente' : 'de quem entrega'} <span className="req">*</span></label>
           <SignaturePad onChange={setSigData} />
           <div className="rec-nav">
             <button className="btn-ghost" onClick={() => setReviewed(false)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
@@ -1153,7 +1169,7 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS }: { onBack
                   Continuar <i className="ti ti-arrow-right" aria-hidden="true"></i>
                 </button>
               )}
-              {!isDraft && r.signed_at && onOpenOS && (
+              {!isDraft && r.signed_at && r.status !== 'delivered' && onOpenOS && (
                 r.os_opened_at
                   ? <button className="btn-ghost btn-sm" onClick={() => onOpenOS(r.id)} title="Ver Ordem de Serviço"><i className="ti ti-clipboard-list" aria-hidden="true"></i> Ver OS</button>
                   : <button className="btn-primary btn-sm" onClick={() => onOpenOS(r.id)} title="Iniciar Ordem de Serviço"><i className="ti ti-tools" aria-hidden="true"></i> Iniciar OS</button>
@@ -1251,6 +1267,7 @@ function ReceptionDetail({ joId, onBack, onResume, isOwner }: { joId: string; on
         <Row label="Situação" value={STATUS_LABEL[jo.status] || jo.status} />
         {jo.booking_date && <Row label="Marcação" value={fmt(jo.booking_date)} />}
         {jo.received_at && !isDraft && <Row label="Entrada" value={fmt(jo.received_at)} />}
+        {jo.signer_is_owner === false && jo.signer_name && <Row label="Entregue por" value={`${jo.signer_name} (não é o dono)`} />}
         {jo.received_by_name && <Row label="Finalizada por" value={jo.received_by_name} />}
         {jo.draft_created_by_name && jo.draft_created_by_name !== jo.received_by_name && (
           <Row label="Iniciada por" value={jo.draft_created_by_name} />
