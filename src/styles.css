@@ -495,3 +495,8 @@ textarea { resize: vertical; line-height: 1.55; }
 .log-time { font-size: 11px; color: var(--ink-3); }
 .log-msg { margin-top: 6px; color: var(--ink); font-family: monospace; font-size: 12px; word-break: break-word; }
 .log-code { margin-top: 3px; font-size: 11px; color: var(--ink-3); font-family: monospace; }
+
+/* ── Filtros da lista ─────────────────────────────────────── */
+.list-filters { display: flex; gap: 7px; overflow-x: auto; padding: 4px 0 10px; -webkit-overflow-scrolling: touch; }
+.filter-chip { flex-shrink: 0; padding: 6px 14px; border-radius: 20px; border: 1px solid var(--line-2); background: var(--s1); color: var(--ink-2); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.filter-chip.on { background: var(--brand); border-color: var(--brand); color: #fff; }

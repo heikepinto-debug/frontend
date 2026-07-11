@@ -127,16 +127,20 @@ function Shell() {
         <main className="home home-bg">
           <h1>Olá, {user?.name?.split(' ')[0]}</h1>
           <div className="home-actions">
-            <button className="action-card" onClick={() => { setResumeDraftId(undefined); setView('reception') }}>
-              <div className="action-ic"><i className="ti ti-car" aria-hidden="true"></i></div>
-              <span className="action-title">Nova recepção</span>
-              <span className="action-sub">Cliente, viatura, fotos e assinatura</span>
-            </button>
-            <button className="action-card" onClick={() => setView('list')}>
-              <div className="action-ic"><i className="ti ti-list-details" aria-hidden="true"></i></div>
-              <span className="action-title">Recepções</span>
-              <span className="action-sub">Ver ordens de trabalho criadas</span>
-            </button>
+            {canDo('reception:create') && (
+              <button className="action-card" onClick={() => { setResumeDraftId(undefined); setView('reception') }}>
+                <div className="action-ic"><i className="ti ti-car" aria-hidden="true"></i></div>
+                <span className="action-title">Nova recepção</span>
+                <span className="action-sub">Cliente, viatura, fotos e assinatura</span>
+              </button>
+            )}
+            {canDo('reception:read') && (
+              <button className="action-card" onClick={() => setView('list')}>
+                <div className="action-ic"><i className="ti ti-list-details" aria-hidden="true"></i></div>
+                <span className="action-title">Recepções</span>
+                <span className="action-sub">Ver ordens de trabalho e serviço</span>
+              </button>
+            )}
             {authCount > 0 && (
               <button className="action-card" onClick={() => setView('authorizations')}>
                 <div className="action-ic"><i className="ti ti-clipboard-check" aria-hidden="true"></i><span className="card-badge">{authCount}</span></div>
@@ -144,11 +148,13 @@ function Shell() {
                 <span className="action-sub">{authCount} diagnóstico{authCount > 1 ? 's' : ''} à espera de si</span>
               </button>
             )}
-            <button className="action-card" onClick={() => setView('bookings')}>
-              <div className="action-ic"><i className="ti ti-calendar-event" aria-hidden="true"></i>{bookingCount > 0 && <span className="card-badge">{bookingCount}</span>}</div>
-              <span className="action-title">Marcações</span>
-              <span className="action-sub">{bookingCount > 0 ? `${bookingCount} para hoje ou em atraso` : 'Agenda de veículos marcados'}</span>
-            </button>
+            {canDo('reception:create') && (
+              <button className="action-card" onClick={() => setView('bookings')}>
+                <div className="action-ic"><i className="ti ti-calendar-event" aria-hidden="true"></i>{bookingCount > 0 && <span className="card-badge">{bookingCount}</span>}</div>
+                <span className="action-title">Marcações</span>
+                <span className="action-sub">{bookingCount > 0 ? `${bookingCount} para hoje ou em atraso` : 'Agenda de veículos marcados'}</span>
+              </button>
+            )}
             <button className="action-card" onClick={() => setView('tasks')}>
               <div className="action-ic"><i className="ti ti-checklist" aria-hidden="true"></i></div>
               <span className="action-title">Tarefas</span>
@@ -1203,6 +1209,7 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS }: { onBack
   const [rows, setRows] = useState<any[]>([])
   const [pdfBusy, setPdfBusy] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState<'all' | 'diagnosis' | 'working' | 'ready' | 'delivered'>('all')
   const [loading, setLoading] = useState(true)
 
   const load = (q = '') => {
@@ -1272,8 +1279,24 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS }: { onBack
         {search && <button className="search-clear" onClick={() => setSearch('')}><i className="ti ti-x" aria-hidden="true"></i></button>}
       </div>
 
+      <div className="list-filters">
+        {([['all', 'Todos'], ['diagnosis', 'Por diagnosticar'], ['working', 'Em trabalho'], ['ready', 'Prontos'], ['delivered', 'Entregues']] as const).map(([v, l]) => (
+          <button key={v} className={`filter-chip ${filter === v ? 'on' : ''}`} onClick={() => setFilter(v)}>{l}</button>
+        ))}
+      </div>
+
       <div className="list">
-        {rows.map(r => {
+        {(() => {
+          const visible = rows.filter(r => {
+            if (filter === 'all') return r.status !== 'delivered' && r.status !== 'cancelled'
+            if (filter === 'diagnosis') return r.status === 'awaiting_diagnosis' || r.status === 'in_diagnosis' || r.status === 'diagnosis_review'
+            if (filter === 'working') return r.status === 'awaiting_quote' || r.status === 'quote_sent' || r.status === 'approved' || r.status === 'in_progress' || r.status === 'quality_check'
+            if (filter === 'ready') return r.status === 'ready'
+            if (filter === 'delivered') return r.status === 'delivered'
+            return true
+          })
+          return <>
+          {visible.map(r => {
           const isDraft = r.status === 'draft'
           return (
             <div key={r.id} className={`list-row clickable ${isDraft ? 'is-draft' : ''}`}>
@@ -1323,7 +1346,9 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS }: { onBack
             </div>
           )
         })}
-        {!loading && rows.length === 0 && <p className="empty">{search ? 'Nada encontrado para essa pesquisa.' : 'Ainda sem recepções.'}</p>}
+        {!loading && visible.length === 0 && <p className="empty">{search ? 'Nada encontrado para essa pesquisa.' : rows.length === 0 ? 'Ainda sem recepções.' : 'Nenhum carro neste filtro.'}</p>}
+          </>
+        })()}
       </div>
     </main>
   )
