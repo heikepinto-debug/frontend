@@ -223,7 +223,12 @@ const blobToBase64 = (b: Blob): Promise<string> => new Promise((res, rej) => {
 // Comprime uma foto antes de enviar: redimensiona para no máx. 1600px no lado
 // maior e recomprime a JPEG 78%. Reduz ~90% do tamanho mantendo legível a
 // matrícula, as porcas e a referência da bateria. Se falhar, devolve o original.
-const compressImage = (blob: Blob, maxSide = 1600, quality = 0.78): Promise<Blob> =>
+// Comprime uma foto antes de enviar. Como a lentidão da finalização foi resolvida
+// (o PDF deixou de ser gerado nesse momento), já não precisamos de comprimir de
+// forma agressiva. Privilegiamos a QUALIDADE: 2000px no lado maior e JPEG 88%.
+// Reduz bastante um ficheiro grande (8MB → ~1.5MB) mantendo nítidas a matrícula,
+// as porcas e a referência da bateria. Se falhar, devolve o original.
+const compressImage = (blob: Blob, maxSide = 2000, quality = 0.88): Promise<Blob> =>
   new Promise((resolve) => {
     try {
       const img = new Image()
