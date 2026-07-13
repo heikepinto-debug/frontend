@@ -257,6 +257,13 @@ function Shell() {
       {view === 'authorizations' && <Authorizations onBack={() => setView('home')} onOpen={(id: string) => { setOsId(id); setOsReturnTo('authorizations'); setView('os') }} />}
       {view === 'errorlogs' && <ErrorLogs onBack={() => setView('home')} />}
       {view === 'tasks' && <Tasks onBack={() => setView('home')} isOwner={isOwner} myId={user?.id || ''} />}
+
+      {/* Botão flutuante — nova recepção sempre à mão no telemóvel/tablet */}
+      {canDo('reception:create') && view !== 'reception' && (
+        <button className="fab" onClick={() => { setResumeDraftId(undefined); setView('reception') }} title="Nova recepção" aria-label="Nova recepção">
+          <i className="ti ti-plus" aria-hidden="true"></i>
+        </button>
+      )}
       </div>
     </div>
   )
