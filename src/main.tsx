@@ -92,7 +92,10 @@ function Shell() {
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); clearInterval(t) }
   }, [])
 
-  // Contador de marcações (hoje + em atraso) — actualiza ao voltar ao início
+  const [summary, setSummary] = useState<any>(null)
+  const [navOpen, setNavOpen] = useState(false)  // menu no telemóvel
+
+  // Contadores e resumo do painel — actualiza ao voltar ao início
   useEffect(() => {
     if (view === 'home') {
       api('/api/v1/bookings').then(r => {
@@ -101,64 +104,147 @@ function Shell() {
         setBookingCount(relevant.length)
       }).catch(() => {})
       api('/api/v1/os/awaiting-authorization').then(r => setAuthCount((r.data || []).length)).catch(() => {})
+      api('/api/v1/dashboard/summary').then(setSummary).catch(() => {})
     }
   }, [view])
 
+  const nav = (v: string, label: string, icon: string, count?: number, badge = false) => ({
+    v, label, icon, count, badge,
+  })
+  const navItems = [
+    nav('home', 'Painel', 'ti-layout-dashboard'),
+    canDo('reception:create') && nav('reception', 'Nova recepção', 'ti-plus'),
+    canDo('reception:read') && nav('list', 'Recepções', 'ti-list-details', summary?.inShop),
+    authCount > 0 && nav('authorizations', 'Autorizações', 'ti-clipboard-check', authCount, true),
+    canDo('reception:create') && nav('bookings', 'Marcações', 'ti-calendar-event', bookingCount || undefined, bookingCount > 0),
+    nav('tasks', 'Tarefas', 'ti-checklist'),
+  ].filter(Boolean) as any[]
+
+  const go = (v: string) => { setView(v as any); setNavOpen(false) }
+
   return (
-    <div className="shell">
-      <header className="tenant-header">
-        {tenant?.logoUrl
-          ? <img src={tenant.logoUrl} alt="" className="tenant-logo" />
-          : <div className="tenant-logo-fallback">{tenant?.name?.[0]}</div>}
-        <div>
+    <div className="app-shell">
+      {/* Sidebar (PC/tablet fixa; telemóvel abre por cima) */}
+      {navOpen && <div className="nav-scrim" onClick={() => setNavOpen(false)} />}
+      <aside className={`sidebar ${navOpen ? 'open' : ''}`}>
+        <div className="sidebar-brand">
+          {tenant?.logoUrl
+            ? <img src={tenant.logoUrl} alt="" className="sidebar-logo" />
+            : <div className="tenant-logo-fallback">{tenant?.name?.[0]}</div>}
+          <div className="sidebar-brand-text">
+            <div className="tenant-name">{tenant?.name}</div>
+            <div className="tenant-powered">OficinaHub</div>
+          </div>
+        </div>
+
+        <nav className="sidebar-nav">
+          {navItems.map(it => (
+            <button key={it.v} className={`nav-item ${view === it.v ? 'active' : ''}`} onClick={() => go(it.v)}>
+              <i className={`ti ${it.icon}`} aria-hidden="true"></i>
+              <span className="nav-label">{it.label}</span>
+              {it.count != null && it.count > 0 && <span className={`nav-count ${it.badge ? 'badge' : ''}`}>{it.count}</span>}
+            </button>
+          ))}
+        </nav>
+
+        <div className="sidebar-foot">
+          {isOwner && (
+            <button className={`nav-item ${view === 'errorlogs' ? 'active' : ''}`} onClick={() => go('errorlogs')}>
+              <i className="ti ti-bug" aria-hidden="true"></i><span className="nav-label">Diagnóstico</span>
+            </button>
+          )}
+          <div className="sidebar-user">
+            <div className="sidebar-user-info">
+              <div className="sidebar-user-name">{user?.name}</div>
+              {!online && <span className="offline-pill">Offline{pending > 0 ? ` · ${pending}` : ''}</span>}
+              {online && pending > 0 && <span className="sync-pill">A sincronizar {pending}…</span>}
+            </div>
+            <button className="btn-ghost btn-sm" onClick={logout} title="Sair"><i className="ti ti-logout" aria-hidden="true"></i></button>
+          </div>
+        </div>
+      </aside>
+
+      {/* Área de conteúdo */}
+      <div className="content-area">
+        <header className="mobile-topbar">
+          <button className="btn-ghost btn-sm" onClick={() => setNavOpen(true)}><i className="ti ti-menu-2" aria-hidden="true"></i></button>
           <div className="tenant-name">{tenant?.name}</div>
-          <div className="tenant-powered">powered by OficinaHub</div>
-        </div>
-        <div className="header-right">
-          {!online && <span className="offline-pill">Offline{pending > 0 ? ` · ${pending}` : ''}</span>}
-          {online && pending > 0 && <span className="sync-pill">A sincronizar {pending}…</span>}
-          <span className="user-name">{user?.name}</span>
-          {isOwner && <button className="btn-ghost btn-sm" onClick={() => setView('errorlogs')} title="Diagnóstico do sistema"><i className="ti ti-bug" aria-hidden="true"></i></button>}
-          <button className="btn-ghost btn-sm" onClick={logout}>Sair</button>
-        </div>
-      </header>
+          <span style={{ width: 32 }} />
+        </header>
 
       {view === 'home' && (
-        <main className="home home-bg">
-          <h1>Olá, {user?.name?.split(' ')[0]}</h1>
-          <div className="home-actions">
+        <main className="dash home-bg">
+          <div className="dash-head">
+            <div>
+              <h1>Olá, {user?.name?.split(' ')[0]}</h1>
+              <p className="dash-date">{new Date().toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+            </div>
+          </div>
+
+          {/* Painel de relance */}
+          <div className="stat-grid">
+            <button className="stat-card accent" onClick={() => setView('list')}>
+              <div className="stat-num">{summary?.inShop ?? '–'}</div>
+              <div className="stat-label">Carros na oficina</div>
+            </button>
+            <button className="stat-card" onClick={() => setView('list')}>
+              <div className="stat-num">{summary?.diagnosing ?? '–'}</div>
+              <div className="stat-label">Em diagnóstico</div>
+            </button>
+            <button className="stat-card" onClick={() => setView('list')}>
+              <div className="stat-num">{summary?.working ?? '–'}</div>
+              <div className="stat-label">Em trabalho</div>
+            </button>
+            <button className="stat-card ok" onClick={() => setView('list')}>
+              <div className="stat-num">{summary?.ready ?? '–'}</div>
+              <div className="stat-label">Prontos a levantar</div>
+            </button>
             {canDo('reception:create') && (
-              <button className="action-card" onClick={() => { setResumeDraftId(undefined); setView('reception') }}>
-                <div className="action-ic"><i className="ti ti-car" aria-hidden="true"></i></div>
-                <span className="action-title">Nova recepção</span>
-                <span className="action-sub">Cliente, viatura, fotos e assinatura</span>
-              </button>
-            )}
-            {canDo('reception:read') && (
-              <button className="action-card" onClick={() => setView('list')}>
-                <div className="action-ic"><i className="ti ti-list-details" aria-hidden="true"></i></div>
-                <span className="action-title">Recepções</span>
-                <span className="action-sub">Ver ordens de trabalho e serviço</span>
+              <button className="stat-card" onClick={() => setView('bookings')}>
+                <div className="stat-num">{summary?.bookingsToday ?? '–'}</div>
+                <div className="stat-label">Marcações hoje</div>
               </button>
             )}
             {authCount > 0 && (
-              <button className="action-card" onClick={() => setView('authorizations')}>
-                <div className="action-ic"><i className="ti ti-clipboard-check" aria-hidden="true"></i><span className="card-badge">{authCount}</span></div>
-                <span className="action-title">Autorizações</span>
-                <span className="action-sub">{authCount} diagnóstico{authCount > 1 ? 's' : ''} à espera de si</span>
+              <button className="stat-card warn" onClick={() => setView('authorizations')}>
+                <div className="stat-num">{summary?.pendingAuth ?? authCount}</div>
+                <div className="stat-label">Autorizações pendentes</div>
+              </button>
+            )}
+          </div>
+
+          {/* Acções rápidas */}
+          <div className="dash-section-title">Acções</div>
+          <div className="quick-actions">
+            {canDo('reception:create') && (
+              <button className="quick-card" onClick={() => { setResumeDraftId(undefined); setView('reception') }}>
+                <i className="ti ti-plus" aria-hidden="true"></i>
+                <span>Nova recepção</span>
+              </button>
+            )}
+            {canDo('reception:read') && (
+              <button className="quick-card" onClick={() => setView('list')}>
+                <i className="ti ti-list-details" aria-hidden="true"></i>
+                <span>Ver carros</span>
+              </button>
+            )}
+            {authCount > 0 && (
+              <button className="quick-card" onClick={() => setView('authorizations')}>
+                <i className="ti ti-clipboard-check" aria-hidden="true"></i>
+                <span>Autorizar diagnósticos</span>
+                <span className="quick-badge">{authCount}</span>
               </button>
             )}
             {canDo('reception:create') && (
-              <button className="action-card" onClick={() => setView('bookings')}>
-                <div className="action-ic"><i className="ti ti-calendar-event" aria-hidden="true"></i>{bookingCount > 0 && <span className="card-badge">{bookingCount}</span>}</div>
-                <span className="action-title">Marcações</span>
-                <span className="action-sub">{bookingCount > 0 ? `${bookingCount} para hoje ou em atraso` : 'Agenda de veículos marcados'}</span>
+              <button className="quick-card" onClick={() => setView('bookings')}>
+                <i className="ti ti-calendar-event" aria-hidden="true"></i>
+                <span>Marcações</span>
+                {bookingCount > 0 && <span className="quick-badge">{bookingCount}</span>}
               </button>
             )}
-            <button className="action-card" onClick={() => setView('tasks')}>
-              <div className="action-ic"><i className="ti ti-checklist" aria-hidden="true"></i></div>
-              <span className="action-title">Tarefas</span>
-              <span className="action-sub">As minhas tarefas e as que atribuí</span>
+            <button className="quick-card" onClick={() => setView('tasks')}>
+              <i className="ti ti-checklist" aria-hidden="true"></i>
+              <span>Tarefas</span>
             </button>
           </div>
         </main>
@@ -171,6 +257,7 @@ function Shell() {
       {view === 'authorizations' && <Authorizations onBack={() => setView('home')} onOpen={(id: string) => { setOsId(id); setOsReturnTo('authorizations'); setView('os') }} />}
       {view === 'errorlogs' && <ErrorLogs onBack={() => setView('home')} />}
       {view === 'tasks' && <Tasks onBack={() => setView('home')} isOwner={isOwner} myId={user?.id || ''} />}
+      </div>
     </div>
   )
 }
