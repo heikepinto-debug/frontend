@@ -75,11 +75,13 @@ function Shell() {
   const canDo = useSession(s => s.can)
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
   const [osReturnTo, setOsReturnTo] = useState<'list' | 'authorizations'>('list')
+  const [signId, setSignId] = useState<string | undefined>(undefined)
+  const [completeId, setCompleteId] = useState<string | undefined>(undefined)
   const [bookingCount, setBookingCount] = useState(0)
   const [authCount, setAuthCount] = useState(0)
   const isOwner = canDo('jobdelete:any')
@@ -148,6 +150,9 @@ function Shell() {
         </nav>
 
         <div className="sidebar-foot">
+          <button className={`nav-item ${view === 'password' ? 'active' : ''}`} onClick={() => go('password')}>
+            <i className="ti ti-key" aria-hidden="true"></i><span className="nav-label">A minha senha</span>
+          </button>
           {isOwner && (
             <button className={`nav-item ${view === 'errorlogs' ? 'active' : ''}`} onClick={() => go('errorlogs')}>
               <i className="ti ti-bug" aria-hidden="true"></i><span className="nav-label">Diagnóstico</span>
@@ -250,11 +255,16 @@ function Shell() {
         </main>
       )}
       {view === 'reception' && <Reception key={resumeDraftId || 'new'} resumeDraftId={resumeDraftId} onDone={() => { setResumeDraftId(undefined); setView('list') }} onBack={() => { setResumeDraftId(undefined); setView('home') }} />}
-      {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }} />}
+      {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
+        onSign={(id: string) => { setSignId(id); setView('sign') }}
+        onComplete={(id: string) => { setCompleteId(id); setView('complete') }} />}
       {view === 'detail' && detailId && <ReceptionDetail joId={detailId} onBack={() => setView('list')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} isOwner={isOwner} />}
       {view === 'bookings' && <Bookings onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} />}
       {view === 'os' && osId && <OrderService joId={osId} onBack={() => setView(osReturnTo)} myId={user?.id || ''} isOwner={isOwner} />}
       {view === 'authorizations' && <Authorizations onBack={() => setView('home')} onOpen={(id: string) => { setOsId(id); setOsReturnTo('authorizations'); setView('os') }} />}
+      {view === 'sign' && signId && <CompleteSignature joId={signId} onBack={() => setView('list')} onDone={() => { setSignId(undefined); setView('list') }} />}
+      {view === 'complete' && completeId && <CompleteEntry joId={completeId} onBack={() => setView('list')} onDone={() => { setCompleteId(undefined); setView('list') }} />}
+      {view === 'password' && <ChangePassword onBack={() => setView('home')} />}
       {view === 'errorlogs' && <ErrorLogs onBack={() => setView('home')} />}
       {view === 'tasks' && <Tasks onBack={() => setView('home')} isOwner={isOwner} myId={user?.id || ''} />}
 
@@ -396,6 +406,12 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   const [newVeh, setNewVeh] = useState(false)
   const [plate, setPlate] = useState(''); const [brand, setBrand] = useState('')
   const [model, setModel] = useState(''); const [vyear, setVyear] = useState('')
+  const [vin, setVin] = useState('')                                        // identidade permanente do carro
+  const [isNonRunner, setIsNonRunner] = useState(false)                     // entrou sem funcionar
+  const [entryPending, setEntryPending] = useState(false)                   // KM e painel ficam para depois
+  const [pendingReason, setPendingReason] = useState('')                    // porquê — escrito à mão, de propósito
+  const [nonRunnerTerms, setNonRunnerTerms] = useState<any>(null)           // texto dos T&C do non-runner
+  const [nonRunnerAccepted, setNonRunnerAccepted] = useState(false)
 
   const [intentions, setIntentions] = useState<string[]>([])   // intenções múltiplas do cliente
   const [intentInput, setIntentInput] = useState('')
@@ -438,6 +454,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   useEffect(() => {
     api('/api/v1/business-units').then(r => { setUnits(r.data); if (r.data[0]) setUnitId(r.data[0].id) }).catch(() => {})
     api('/api/v1/terms/active').then(setTerms).catch(() => {})
+    api('/api/v1/terms/non_runner').then(setNonRunnerTerms).catch(() => {})
     // Pop-up do dever de diagnóstico (se ligado) — só numa entrada nova, não ao retomar rascunho
     if (!resumeDraftId) {
       api('/api/v1/reception-config').then(r => { if (r.diagnosisNoticeOn) setShowDiagNotice(true) }).catch(() => {})
@@ -479,12 +496,14 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       businessUnitId: unitId,
       customer: existingCust ? { id: existingCust.id } : { fullName: custName, phone: custPhone, email: custEmail || undefined },
       vehicle: existingVeh ? { id: existingVeh.id, plate: existingVeh.plate }
-        : { plate: plate.toUpperCase(), brand, model, year: vyear ? Number(vyear) : undefined },
+        : { plate: plate.toUpperCase(), brand, model, year: vyear ? Number(vyear) : undefined, vin: vin.trim() || undefined },
       kmEntry: km ? Number(km) : undefined, fuelLevel: fuel,
       declaredValuables: valuables || undefined,
       checklist, damageZones: damages.map(d => ({ id: d.id, area: d.area, note: d.note })),
       batteryReference: batteryRef || undefined, systemsCheck,
       wantsOldParts: wantsOldParts ?? undefined,
+      isNonRunner,
+      entryPendingReason: entryPending ? pendingReason.trim() : undefined,
       intentions, serviceDescription: svcDesc || undefined,
       bookingDate: bookingDate || undefined,
     }
@@ -548,19 +567,30 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   const totalReq = reqCount + wheelCount + batteryCount + dashCount
   const allTc = tc.every(Boolean)
   // Detecta se o serviço envolve remap ou dyno (para o aviso específico)
-  const isRemapDyno = intentions.some(i => /remap|reprogram|dyno|tune|tuning|stage|potência|potencia|mapa/i.test(i))
+  // Rede de segurança: detecção por palavras-chave é frágil (um termo que não
+  // esteja aqui escapa ao aviso). Solução definitiva = tipo de serviço explícito
+  // e configurável por oficina. Até lá, alargámos a lista.
+  const isRemapDyno = intentions.some(i => /remap|reprogram|dyno|dinamómetro|dinamometro|tune|tuning|stage|potência|potencia|mapa|unichip|uni-chip|chip|piggyback|piggy-back|ecu|centralina|afina|pops|bangs|launch|hardcut|hard cut|adblue|dpf|egr/i.test(i))
 
   const canNext = (): boolean => {
     switch (step) {
       case 0: return !!existingCust || (newCust && custName.trim().length >= 2 && V.phone(custPhone) && V.email(custEmail))
       case 1: return !!existingVeh || (V.plate(plate) && V.year(vyear))  // ano opcional (V.year aceita vazio)
       case 2: return intentions.length >= 1
-      case 3: return valuables.trim().length > 0 && V.km(km) && wantsOldParts !== null
+      case 3: return valuables.trim().length > 0 && (entryPending ? pendingReason.trim().length >= 3 : V.km(km)) && wantsOldParts !== null
       case 4: return true                       // danos são opcionais
-      case 5: return totalReq >= REQ_TOTAL && batteryRef.trim().length > 0  // fotos + referência da bateria
+      case 5: {
+        // Com a entrada pendente, dispensam-se só as 3 do painel (exigem ignição).
+        // Exterior, rodas e bateria continuam obrigatórios: são a defesa contra
+        // "faltava-me uma peça", e essas tiram-se com o carro morto.
+        const exigidas = entryPending ? REQ_TOTAL - DASH_ZONES.length : REQ_TOTAL
+        const tiradas = entryPending ? reqCount + wheelCount + batteryCount : totalReq
+        return tiradas >= exigidas && batteryRef.trim().length > 0
+      }
       case 6: {
         if (!allTc || !sigData) return false
         if (isRemapDyno && !remapAccepted) return false
+        if (isNonRunner && !nonRunnerAccepted) return false
         if (!signerIsOwner && signerName.trim().length < 2) return false
         // identidade: precisa se é portador, ou se é dono mas cliente novo
         const needsId = !signerIsOwner || (newCust && !existingCust)
@@ -583,13 +613,15 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       customer: existingCust ? { id: existingCust.id }
         : { fullName: custName, phone: custPhone, email: custEmail || undefined },
       vehicle: existingVeh ? { id: existingVeh.id, plate: existingVeh.plate }
-        : { plate: plate.toUpperCase(), brand, model, year: vyear ? Number(vyear) : undefined },
-      kmEntry: Number(km), fuelLevel: fuel,
+        : { plate: plate.toUpperCase(), brand, model, year: vyear ? Number(vyear) : undefined, vin: vin.trim() || undefined },
+      kmEntry: km ? Number(km) : undefined, fuelLevel: fuel,
       declaredValuables: valuables || 'Nenhum objecto declarado',
       checklist,
       damageZones: damages.map(d => ({ id: d.id, area: d.area, note: d.note })),
       batteryReference: batteryRef || undefined, systemsCheck,
       wantsOldParts: wantsOldParts ?? undefined,
+      isNonRunner,
+      entryPendingReason: entryPending ? pendingReason.trim() : undefined,
       intentions, serviceDescription: svcDesc || undefined,
       bookingDate: bookingDate || undefined,
       termsVersion: terms?.version || '1.0',
@@ -810,8 +842,23 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
               <div style={{ marginTop: 14, maxWidth: 160 }}><label className="fl">Ano (opcional)</label>
                 <input type="number" value={vyear} onChange={e => setVyear(e.target.value)} placeholder="2020" />
                 {!V.year(vyear) && <div className="field-warn">Ano inválido.</div>}</div>
+              <div style={{ marginTop: 14 }}><label className="fl">VIN / Nº de chassi (opcional)</label>
+                <input value={vin} onChange={e => setVin(e.target.value.toUpperCase())} placeholder="Ex: WVWZZZ1KZ8W123456" maxLength={20} />
+                <p className="hint" style={{ marginTop: 6 }}>Identifica o carro de forma permanente — não muda quando a matrícula muda. Se souberes, regista; fica guardado para sempre.</p></div>
             </>
           )}
+
+          <label className="chk-inline" style={{ marginTop: 18 }}>
+            <input type="checkbox" checked={isNonRunner} onChange={e => setIsNonRunner(e.target.checked)} />
+            O carro entrou <strong>sem funcionar</strong> (não arranca / não anda pelos próprios meios)
+          </label>
+          {isNonRunner && (
+            <div className="nonrunner-box">
+              <div className="nonrunner-head"><i className="ti ti-alert-triangle" aria-hidden="true"></i> Condições especiais</div>
+              <p>Um carro que não funciona não pode ser testado — travagem, arrefecimento, transmissão, electrónica e outros sistemas ficam por verificar. Aplicam-se termos próprios, que o cliente terá de aceitar antes de assinar.</p>
+            </div>
+          )}
+
           <div className="rec-nav">
             <button className="btn-ghost" onClick={() => setStep(0)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
             <button className="btn-primary" disabled={!canNext()} onClick={() => setStep(2)}>Próximo <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
@@ -878,13 +925,30 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
           <h2>Estado à entrada</h2>
           <p className="lead">Quilometragem, combustível e o que vem com o carro.</p>
           <div className="grid2">
-            <div><label className="fl">Km actuais <span className="req">*</span></label>
-              <input type="number" inputMode="numeric" value={km} onChange={e => setKm(e.target.value)} placeholder="ex: 87340" /></div>
+            <div><label className="fl">Km actuais {!entryPending && <span className="req">*</span>}</label>
+              <input type="number" inputMode="numeric" value={km} onChange={e => setKm(e.target.value)}
+                placeholder="ex: 87340" disabled={entryPending} /></div>
             <div><label className="fl">Combustível — {Math.round(fuel / 8 * 100)}%</label>
               <div className="fuel-segs">
                 {Array.from({ length: 8 }).map((_, i) => <button key={i} className={`fs ${i < fuel ? 'on' : ''}`} onClick={() => setFuel(i + 1)} />)}
               </div></div>
           </div>
+
+          <label className="chk-inline" style={{ marginTop: 12 }}>
+            <input type="checkbox" checked={entryPending} onChange={e => { setEntryPending(e.target.checked); if (e.target.checked) setKm('') }} />
+            Não consigo ligar o carro para ver o km
+          </label>
+          {entryPending && (
+            <div className="pending-box">
+              <div className="pending-head"><i className="ti ti-battery-off" aria-hidden="true"></i> Entrada fica incompleta</div>
+              <p>O km e as três fotos do painel ficam por registar. Podes fechar a entrada e assinar com o cliente agora — o resto completa-se quando o carro ligar.</p>
+              <p><strong>A OS não arranca enquanto isto não estiver completo.</strong> O carro fica na oficina, portanto não custa nada acabar depois.</p>
+              <label className="fl" style={{ marginTop: 10 }}>Porquê? <span className="req">*</span></label>
+              <input value={pendingReason} onChange={e => setPendingReason(e.target.value)}
+                placeholder="ex: bateria descarregada, carro não liga" />
+              {pendingReason.trim().length > 0 && pendingReason.trim().length < 3 && <div className="field-warn">Escreve o motivo.</div>}
+            </div>
+          )}
           <label className="fl" style={{ marginTop: 18 }}>Itens entregues</label>
           <div className="chk-grid">
             {CHECKLIST.map(c => (
@@ -1019,8 +1083,13 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
             </div>
           </div>
 
-          <label className="fl" style={{ marginTop: 18 }}>Painel e conta-km</label>
-          <div className="dash-grid">
+          <label className="fl" style={{ marginTop: 18 }}>Painel e conta-km {entryPending && <span className="pending-tag">fica para depois</span>}</label>
+          {entryPending && (
+            <p className="hint" style={{ marginBottom: 8 }}>
+              Marcaste que o carro não liga ({pendingReason || 'sem motivo'}). Estas três não são exigidas agora — mas a OS não arranca sem elas.
+            </p>
+          )}
+          <div className={`dash-grid ${entryPending ? 'deferred' : ''}`}>
             {DASH_ZONES.map(z => (
               <button key={z.key} className={`photo-slot dash ${photos[z.key] ? 'done' : ''}`} onClick={() => takePhoto(z.key)}>
                 {photos[z.key] ? <img src={URL.createObjectURL(photos[z.key])} alt={z.label} /> : <span className="photo-icon"><i className="ti ti-camera" aria-hidden="true"></i></span>}
@@ -1148,6 +1217,19 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
               <button className={`chk tc ${remapAccepted ? 'on' : ''}`} onClick={() => setRemapAccepted(v => !v)}>
                 <span className="chk-box">{remapAccepted && <i className="ti ti-check" aria-hidden="true"></i>}</span>
                 Li e aceito este aviso, e autorizo o serviço de reprogramação nestas condições.
+              </button>
+            </div>
+          )}
+
+          {isNonRunner && (
+            <div className="remap-warning nonrunner">
+              <div className="remap-warning-head"><i className="ti ti-engine-off" aria-hidden="true"></i> Aviso importante — Veículo entrou sem funcionar</div>
+              {nonRunnerTerms?.content
+                ? <pre className="terms-text">{nonRunnerTerms.content}</pre>
+                : <p>Um veículo que não funciona não pode ser testado. O registo de entrada reflecte apenas o que foi possível observar, e não substitui uma avaliação do estado geral do veículo. Podem existir avarias que só se revelem quando o veículo voltar a funcionar.</p>}
+              <button className={`chk tc ${nonRunnerAccepted ? 'on' : ''}`} onClick={() => setNonRunnerAccepted(v => !v)}>
+                <span className="chk-box">{nonRunnerAccepted && <i className="ti ti-check" aria-hidden="true"></i>}</span>
+                Li e aceito os termos aplicáveis a veículo que entra sem funcionar.
               </button>
             </div>
           )}
@@ -1297,7 +1379,7 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: 'Cancelado',
 }
 
-function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS }: { onBack: () => void; onResume: (id: string) => void; onOpen: (id: string) => void; isOwner: boolean; onOpenOS?: (id: string) => void }) {
+function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, onComplete }: { onBack: () => void; onResume: (id: string) => void; onOpen: (id: string) => void; isOwner: boolean; onOpenOS?: (id: string) => void; onSign?: (id: string) => void; onComplete?: (id: string) => void }) {
   const canDelete = useSession(s => s.can('jobdelete:any'))
   const canStatus = useSession(s => s.can('jobdelete:any'))   // mudar estado: só dono, nesta fase
   const [rows, setRows] = useState<any[]>([])
@@ -1402,17 +1484,35 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS }: { onBack
                 </div>
                 <div className="list-sub">{r.brand} {r.model}{isDraft ? '' : ` · ${r.photo_count} fotos${r.signed_at ? ' · assinada' : ''}`}</div>
               </div>
+              {r.is_non_runner && <span className="badge-nr" title="Entrou sem funcionar"><i className="ti ti-engine-off" aria-hidden="true"></i> Não funciona</span>}
+              {r.entry_pending_reason && !r.entry_completed_at && (
+                <span className="badge-incomplete" title={`Falta o km e as fotos do painel — ${r.entry_pending_reason}`}>
+                  <i className="ti ti-battery-off" aria-hidden="true"></i> Entrada incompleta
+                </span>
+              )}
               {isDraft
                 ? <span className="badge-draft"><i className="ti ti-device-floppy" aria-hidden="true"></i> Rascunho</span>
                 : r.deletion_status === 'pending'
                   ? <span className="badge-del"><i className="ti ti-trash-x" aria-hidden="true"></i> Elim. pendente</span>
-                  : <span className={`status s-${r.status}`}>{STATUS_LABEL[r.status] || r.status}</span>}
+                  : !r.signed_at
+                    ? <span className="badge-unsigned" title="Finalização não chegou a selar a assinatura"><i className="ti ti-writing-off" aria-hidden="true"></i> Por assinar</span>
+                    : <span className={`status s-${r.status}`}>{STATUS_LABEL[r.status] || r.status}</span>}
               {isDraft && (
                 <button className="btn-primary btn-sm" onClick={() => onResume(r.id)} title="Continuar lançamento">
                   Continuar <i className="ti ti-arrow-right" aria-hidden="true"></i>
                 </button>
               )}
-              {!isDraft && r.signed_at && r.status !== 'delivered' && onOpenOS && (
+              {!isDraft && r.entry_pending_reason && !r.entry_completed_at && onComplete && (
+                <button className="btn-primary btn-sm" onClick={() => onComplete(r.id)} title="Registar o km e as fotos do painel">
+                  <i className="ti ti-battery-charging" aria-hidden="true"></i> Completar entrada
+                </button>
+              )}
+              {!isDraft && !r.signed_at && r.status !== 'delivered' && onSign && (
+                <button className="btn-primary btn-sm" onClick={() => onSign(r.id)} title="Completar a assinatura em falta">
+                  <i className="ti ti-signature" aria-hidden="true"></i> Assinar agora
+                </button>
+              )}
+              {!isDraft && r.signed_at && r.status !== 'delivered' && onOpenOS && !(r.entry_pending_reason && !r.entry_completed_at) && (
                 r.os_opened_at
                   ? <button className="btn-ghost btn-sm" onClick={() => onOpenOS(r.id)} title="Ver Ordem de Serviço"><i className="ti ti-clipboard-list" aria-hidden="true"></i> Ver OS</button>
                   : <button className="btn-primary btn-sm" onClick={() => onOpenOS(r.id)} title="Iniciar Ordem de Serviço"><i className="ti ti-tools" aria-hidden="true"></i> Iniciar OS</button>
@@ -1679,6 +1779,262 @@ function ReceptionDetail({ joId, onBack, onResume, isOwner }: { joId: string; on
   )
 }
 
+// ── COMPLETAR ENTRADA (km + painel que ficaram pendentes) ────
+// A entrada fechou e assinou sem o km porque o carro não ligava.
+// O cliente já foi — o carro está cá. Aqui acaba-se o que faltava.
+function CompleteEntry({ joId, onBack, onDone }: { joId: string; onBack: () => void; onDone: () => void }) {
+  const [jo, setJo] = useState<any>(null)
+  const [km, setKm] = useState('')
+  const [shots, setShots] = useState<Record<string, Blob>>({})
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const pendingZone = useRef<string | null>(null)
+
+  const load = () => api(`/api/v1/receptions/${joId}`).then(setJo).catch(() => {})
+  useEffect(() => { load() }, [joId])
+
+  // Que fotos do painel já lá estão (podem ter sido tiradas noutra sessão)
+  const already = new Set<string>((jo?.photos || []).map((p: any) => p.zone))
+  const missing = DASH_ZONES.filter(z => !already.has(z.key) && !shots[z.key])
+  const canSave = V.km(km) && km.trim().length > 0 && missing.length === 0
+
+  const takePhoto = (zone: string) => { pendingZone.current = zone; fileRef.current?.click() }
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]; const zone = pendingZone.current
+    if (!f || !zone) return
+    const img = await compressImage(f)
+    setShots(s => ({ ...s, [zone]: img }))
+    e.target.value = ''
+  }
+
+  const save = async () => {
+    if (!canSave || busy) return
+    setBusy(true); setErr(null)
+    try {
+      for (const [zone, blob] of Object.entries(shots)) {
+        if (already.has(zone)) continue
+        await uploadPhoto(joId, zone, blob, { isRequired: true })
+      }
+      await api(`/api/v1/receptions/${joId}/complete-entry`, {
+        method: 'POST', body: JSON.stringify({ kmEntry: Number(km) }),
+      })
+      onDone()
+    } catch (e: any) { setErr(e?.message || 'Não foi possível completar.') }
+    finally { setBusy(false) }
+  }
+
+  if (!jo) return <main className="reception"><p className="empty">A carregar…</p></main>
+
+  return (
+    <main className="reception">
+      <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={onFile} />
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Recepções</button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Completar entrada</h2><span />
+      </div>
+
+      <div className="pending-box">
+        <div className="pending-head"><i className="ti ti-battery-off" aria-hidden="true"></i> Ficou por registar à entrada</div>
+        <p>Motivo: <strong>{jo.entry_pending_reason}</strong></p>
+        <p>Falta o km e as fotos do painel. Assim que estiverem, a OS pode arrancar.</p>
+      </div>
+
+      <div className="sign-summary">
+        <div><strong>{jo.number}</strong> · {jo.plate} · {jo.brand} {jo.model}</div>
+        <div className="hint">Entrou em {jo.received_at ? new Date(jo.received_at).toLocaleDateString('pt-PT') : '—'}</div>
+      </div>
+
+      <label className="fl" style={{ marginTop: 16 }}>Km actuais <span className="req">*</span></label>
+      <input type="number" inputMode="numeric" value={km} onChange={e => setKm(e.target.value)} placeholder="ex: 87340" />
+      {km.length > 0 && !V.km(km) && <div className="field-warn">Km inválidos.</div>}
+
+      <label className="fl" style={{ marginTop: 16 }}>Painel e conta-km <span className="req">*</span></label>
+      <div className="dash-grid">
+        {DASH_ZONES.map(z => {
+          const have = already.has(z.key) || !!shots[z.key]
+          return (
+            <button key={z.key} className={`photo-slot dash ${have ? 'done' : ''}`} onClick={() => takePhoto(z.key)}>
+              {shots[z.key] ? <img src={URL.createObjectURL(shots[z.key])} alt="" />
+                : have ? <span className="photo-icon"><i className="ti ti-check" aria-hidden="true"></i></span>
+                : <span className="photo-icon"><i className="ti ti-camera" aria-hidden="true"></i></span>}
+              <span>{z.label}</span>
+              {z.hint && <em>{z.hint}</em>}
+            </button>
+          )
+        })}
+      </div>
+
+      {err && <div className="field-warn" style={{ marginTop: 12 }}>{err}</div>}
+
+      <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 18 }}
+        disabled={!canSave || busy} onClick={save}>
+        {busy ? 'A guardar…' : <>Completar entrada <i className="ti ti-check" aria-hidden="true"></i></>}
+      </button>
+    </main>
+  )
+}
+
+// ── MUDAR A MINHA SENHA ──────────────────────────────────────
+// Tira à Direcção o trabalho de repor senhas por SQL. Essencial
+// antes de qualquer oficina externa entrar.
+function ChangePassword({ onBack }: { onBack: () => void }) {
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [done, setDone] = useState(false)
+
+  const tooShort = next.length > 0 && next.length < 8
+  const mismatch = confirm.length > 0 && next !== confirm
+  const canSave = current.length > 0 && next.length >= 8 && next === confirm
+
+  const submit = async () => {
+    if (!canSave) return
+    setBusy(true); setErr(null)
+    try {
+      await api('/api/v1/auth/change-password', { method: 'POST', body: JSON.stringify({ current, next }) })
+      setDone(true)
+    } catch (e: any) { setErr(e?.message || 'Não foi possível mudar a senha.') }
+    finally { setBusy(false) }
+  }
+
+  if (done) return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Senha</h2><span />
+      </div>
+      <div className="bi-known" style={{ marginTop: 20 }}>
+        <i className="ti ti-circle-check" aria-hidden="true"></i> Senha alterada. Use a nova da próxima vez que entrar.
+      </div>
+    </main>
+  )
+
+  return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Mudar a minha senha</h2><span />
+      </div>
+      <p className="hint" style={{ marginBottom: 14 }}>A senha é sua e ninguém a vê. Se a esquecer, a Direcção pode repô-la.</p>
+
+      <label className="fl">Senha actual <span className="req">*</span></label>
+      <input type="password" value={current} onChange={e => setCurrent(e.target.value)} autoComplete="current-password" />
+
+      <label className="fl" style={{ marginTop: 14 }}>Nova senha <span className="req">*</span></label>
+      <input type="password" value={next} onChange={e => setNext(e.target.value)} autoComplete="new-password" placeholder="Mínimo 8 caracteres" />
+      {tooShort && <div className="field-warn">Mínimo 8 caracteres.</div>}
+
+      <label className="fl" style={{ marginTop: 14 }}>Repetir a nova senha <span className="req">*</span></label>
+      <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} autoComplete="new-password" />
+      {mismatch && <div className="field-warn">As senhas não coincidem.</div>}
+
+      {err && <div className="field-warn" style={{ marginTop: 12 }}>{err}</div>}
+
+      <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 18 }}
+        disabled={!canSave || busy} onClick={submit}>
+        {busy ? 'A guardar…' : <>Guardar nova senha <i className="ti ti-check" aria-hidden="true"></i></>}
+      </button>
+    </main>
+  )
+}
+
+// ── ASSINAR AGORA (recuperar entrada por assinar) ────────────
+// Uma finalização interrompida pode deixar a entrada criada mas sem
+// assinatura selada — nem rascunho, nem assinada. Este ecrã completa
+// a assinatura sem refazer a recepção: as fotos já lá estão.
+// A assinatura é REAL, feita agora, e fica registada com a hora de agora.
+function CompleteSignature({ joId, onBack, onDone }: { joId: string; onBack: () => void; onDone: () => void }) {
+  const [jo, setJo] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [sigData, setSigData] = useState<string | null>(null)
+  const [signerIsOwner, setSignerIsOwner] = useState(true)
+  const [signerName, setSignerName] = useState('')
+  const [biNumber, setBiNumber] = useState('')
+  const [accepted, setAccepted] = useState(false)
+
+  useEffect(() => {
+    api(`/api/v1/receptions/${joId}`).then(setJo).catch((e: any) => setErr(e?.message || 'Erro'))
+      .finally(() => setLoading(false))
+  }, [joId])
+
+  const canSign = accepted && !!sigData && (signerIsOwner || signerName.trim().length >= 2)
+
+  const submit = async () => {
+    if (!canSign) return
+    setBusy(true); setErr(null)
+    try {
+      await api(`/api/v1/receptions/${joId}/sign`, {
+        method: 'POST', body: JSON.stringify({
+          signatureBase64: sigData!.split(',')[1],
+          signerIsOwner,
+          signerName: signerIsOwner ? undefined : (signerName || undefined),
+          signerBiNumber: biNumber.trim() || undefined,
+        }),
+      })
+      onDone()
+    } catch (e: any) { setErr(e?.message || 'Não foi possível selar a assinatura.') }
+    finally { setBusy(false) }
+  }
+
+  if (loading) return <main className="reception"><p className="empty">A carregar…</p></main>
+
+  return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Recepções</button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Assinar agora</h2><span />
+      </div>
+
+      <div className="remap-warning nonrunner">
+        <div className="remap-warning-head"><i className="ti ti-writing-off" aria-hidden="true"></i> Esta entrada ficou por assinar</div>
+        <p>A finalização não chegou a selar a assinatura — pode ter falhado a rede ou a aplicação ter sido fechada. As fotos e os dados estão todos registados; falta apenas a assinatura.</p>
+        <p><strong>A assinatura é feita agora, de verdade.</strong> Fica registada com a data e hora de hoje, que é o que realmente acontece. A entrada continua a mostrar a data em que o carro deu entrada.</p>
+      </div>
+
+      {jo && (
+        <div className="sign-summary">
+          <div><strong>{jo.number}</strong> · {jo.plate} · {jo.brand} {jo.model}</div>
+          <div className="hint">Cliente: {jo.customer_name} · Entrou em {jo.received_at ? new Date(jo.received_at).toLocaleDateString('pt-PT') : '—'}</div>
+        </div>
+      )}
+
+      <label className="chk-inline" style={{ marginTop: 16 }}>
+        <input type="checkbox" checked={!signerIsOwner} onChange={e => setSignerIsOwner(!e.target.checked)} />
+        Quem assina não é o dono do carro
+      </label>
+      {!signerIsOwner && (
+        <>
+          <label className="fl" style={{ marginTop: 10 }}>Nome de quem assina <span className="req">*</span></label>
+          <input value={signerName} onChange={e => setSignerName(e.target.value)} placeholder="Nome e apelido" />
+        </>
+      )}
+
+      <label className="fl" style={{ marginTop: 14 }}>Nº do documento (opcional)</label>
+      <input value={biNumber} onChange={e => setBiNumber(e.target.value)} placeholder="Número do BI / passaporte" />
+
+      <button className={`chk tc ${accepted ? 'on' : ''}`} style={{ marginTop: 16 }} onClick={() => setAccepted(v => !v)}>
+        <span className="chk-box">{accepted && <i className="ti ti-check" aria-hidden="true"></i>}</span>
+        Confirmo o registo de entrada deste veículo e aceito os termos e condições.
+      </button>
+
+      <label className="fl" style={{ marginTop: 14 }}>Assinatura <span className="req">*</span></label>
+      <SignaturePad onChange={setSigData} />
+
+      {err && <div className="field-warn" style={{ marginTop: 12 }}>{err}</div>}
+
+      <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 16 }}
+        disabled={!canSign || busy} onClick={submit}>
+        {busy ? 'A selar…' : <>Selar assinatura <i className="ti ti-check" aria-hidden="true"></i></>}
+      </button>
+    </main>
+  )
+}
+
 // ── LOGS DE ERRO (diagnóstico — só dono) ─────────────────────
 function ErrorLogs({ onBack }: { onBack: () => void }) {
   const [list, setList] = useState<any[]>([])
@@ -1929,6 +2285,7 @@ function OrderService({ joId, onBack, myId, isOwner }: { joId: string; onBack: (
   const jo = data?.jo
   const problems = data?.problems || []
   const isDiag = jo?.status === 'in_diagnosis'
+  const [acting, setActing] = useState(false)      // trava toques repetidos em 3G
   const isReview = jo?.status === 'diagnosis_review'
   const authOn = data?.diagAuthorizationOn
   const iSubmitted = jo?.diag_submitted_by === myId
@@ -1971,17 +2328,22 @@ function OrderService({ joId, onBack, myId, isOwner }: { joId: string; onBack: (
   }
 
   const addProblem = async () => {
-    if (newProblem.trim().length < 2) return
-    try { await api(`/api/v1/os/${joId}/problems`, { method: 'POST', body: JSON.stringify({ description: newProblem, origin: 'team' }) }); setNewProblem(''); load() }
+    if (newProblem.trim().length < 2 || acting) return
+    setActing(true)
+    try { await api(`/api/v1/os/${joId}/problems`, { method: 'POST', body: JSON.stringify({ description: newProblem, origin: 'team' }) }); setNewProblem(''); await load() }
     catch { alert('Não foi possível adicionar.') }
+    finally { setActing(false) }
   }
   const updateProblem = async (pid: string, fields: any) => {
     try { await api(`/api/v1/os/problems/${pid}`, { method: 'POST', body: JSON.stringify(fields) }); load() }
     catch { alert('Erro ao actualizar.') }
   }
   const deleteProblem = async (pid: string) => {
+    if (acting) return
     if (!confirm('Apagar este problema?')) return
-    try { await api(`/api/v1/os/problems/${pid}`, { method: 'DELETE' }); load() } catch { alert('Erro.') }
+    setActing(true)
+    try { await api(`/api/v1/os/problems/${pid}`, { method: 'DELETE' }); await load() } catch { alert('Erro.') }
+    finally { setActing(false) }
   }
   const addPhoto = async (pid: string) => {
     const input = document.createElement('input')
@@ -1998,11 +2360,27 @@ function OrderService({ joId, onBack, myId, isOwner }: { joId: string; onBack: (
     input.click()
   }
   const submitDiagnosis = async () => {
+    if (acting) return
+    // Porta de sentido único: tranca a lista de problemas e passa a
+    // depender de outra pessoa. Não pode ir a um toque distraído.
+    if (!confirm(`Submeter o diagnóstico de ${problems.length} problema${problems.length > 1 ? 's' : ''}?\n\nA lista fica trancada à espera de autorização. Podes retirar a submissão enquanto ninguém a autorizar.`)) return
+    setActing(true)
     try {
       const r = await api(`/api/v1/os/${joId}/submit-diagnosis`, { method: 'POST', body: JSON.stringify({ notes: notes || undefined }) })
       alert(r.status === 'diagnosis_review' ? 'Diagnóstico submetido para autorização.' : 'Diagnóstico concluído. OS pronta para orçamento.')
-      load()
+      await load()
     } catch (e: any) { alert(e?.message || 'Não foi possível submeter.') }
+    finally { setActing(false) }
+  }
+
+  // Retirar a submissão — a saída para quem submeteu por engano.
+  const withdrawDiagnosis = async () => {
+    if (acting) return
+    if (!confirm('Retirar a submissão?\n\nO diagnóstico volta a ficar editável para corrigires. Depois submetes outra vez.')) return
+    setActing(true)
+    try { await api(`/api/v1/os/${joId}/withdraw-diagnosis`, { method: 'POST' }); await load() }
+    catch (e: any) { alert(e?.message || 'Não foi possível retirar.') }
+    finally { setActing(false) }
   }
   const authorize = async () => {
     if (!authSig) return
@@ -2068,13 +2446,16 @@ function OrderService({ joId, onBack, myId, isOwner }: { joId: string; onBack: (
         <>
           <div className="prob-add">
             <input value={newProblem} onChange={e => setNewProblem(e.target.value)} placeholder="Acrescentar problema detectado pela equipa…"
+              disabled={acting}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addProblem() } }} />
-            <button className="btn-primary" onClick={addProblem} disabled={newProblem.trim().length < 2}><i className="ti ti-plus" aria-hidden="true"></i></button>
+            <button className="btn-primary" onClick={addProblem} disabled={acting || newProblem.trim().length < 2}>
+              {acting ? <i className="ti ti-loader-2 spin" aria-hidden="true"></i> : <i className="ti ti-plus" aria-hidden="true"></i>}
+            </button>
           </div>
           <label className="fl" style={{ marginTop: 16 }}>Notas gerais do diagnóstico (opcional)</label>
           <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Observações gerais…" />
-          <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 16 }} onClick={submitDiagnosis} disabled={problems.length === 0}>
-            {authOn ? 'Submeter diagnóstico para autorização' : 'Concluir diagnóstico'}
+          <button className="btn-primary submit-diag" onClick={submitDiagnosis} disabled={acting || problems.length === 0}>
+            {acting ? 'A submeter…' : authOn ? 'Submeter diagnóstico para autorização' : 'Concluir diagnóstico'}
           </button>
         </>
       )}
@@ -2084,7 +2465,13 @@ function OrderService({ joId, onBack, myId, isOwner }: { joId: string; onBack: (
           <div className="os-review-head"><i className="ti ti-clipboard-check" aria-hidden="true"></i> Diagnóstico aguarda autorização</div>
           <p className="det-notes">Submetido por {jo.diag_submitted_by_name}. {authOn && 'A autorização assume a responsabilidade técnica partilhada pelo diagnóstico.'}</p>
           {iSubmitted ? (
-            <p className="det-empty">Não podes autorizar o teu próprio diagnóstico. Aguarda a autorização do responsável.</p>
+            <>
+              <p className="det-empty">Não podes autorizar o teu próprio diagnóstico. Aguarda a autorização do responsável.</p>
+              <p className="det-notes" style={{ marginTop: 8 }}>Enganaste-te ou falta corrigir alguma coisa? Podes retirar a submissão enquanto ninguém a autorizar.</p>
+              <button className="btn-ghost" style={{ marginTop: 8 }} onClick={withdrawDiagnosis} disabled={acting}>
+                <i className="ti ti-arrow-back-up" aria-hidden="true"></i> {acting ? 'A retirar…' : 'Retirar submissão'}
+              </button>
+            </>
           ) : !showAuth && !rejecting ? (
             <div className="rec-nav">
               <button className="btn-ghost danger" onClick={() => setRejecting(true)}>Recusar</button>
@@ -2179,6 +2566,25 @@ function Tasks({ onBack, isOwner, myId }: { onBack: () => void; isOwner: boolean
     try { const r = await api('/api/v1/tasks/weekly-report'); setReport(r); setShowReport(true) } catch { alert('Não foi possível carregar o relatório.') }
   }
 
+  const [editId, setEditId] = useState<string | null>(null)   // tarefa a editar (null = criar)
+
+  // Abre o formulário já preenchido com a tarefa a editar.
+  const startEdit = (t: any) => {
+    setEditId(t.id)
+    setTitle(t.title || ''); setDesc(t.description || '')
+    setAssignTo(t.assigned_to || ''); setDue(t.due_date ? String(t.due_date).slice(0, 10) : '')
+    setPriority(t.priority || 'normal'); setWeight(t.weight || 'normal')
+    setRecurrence(t.recurrence || ''); setReqConfirm(!!t.requires_confirmation)
+    setReqAttach(!!t.requires_attachment)
+    setShowNew(true)
+  }
+
+  const closeForm = () => {
+    setEditId(null); setShowNew(false)
+    setTitle(''); setDesc(''); setAssignTo(''); setDue(''); setPriority('normal')
+    setWeight('normal'); setRecurrence(''); setReqConfirm(false); setReqAttach(false)
+  }
+
   const dismissNotice = async () => {
     setShowNotice(false)
     try { await api('/api/v1/tasks/perf-notice/seen', { method: 'POST' }) } catch {}
@@ -2188,7 +2594,7 @@ function Tasks({ onBack, isOwner, myId }: { onBack: () => void; isOwner: boolean
     if (title.trim().length < 2 || !assignTo) return
     setBusy(true)
     try {
-      await api('/api/v1/tasks', { method: 'POST', body: JSON.stringify({
+      const payload = {
         title, description: desc || undefined, assignedTo: assignTo,
         dueDate: due || undefined, priority,
         weight: isOwner ? weight : undefined,
@@ -2196,11 +2602,12 @@ function Tasks({ onBack, isOwner, myId }: { onBack: () => void; isOwner: boolean
         requiresConfirmation: reqConfirm || undefined,
         requiresAttachment: reqAttach || undefined,
         recurrence: recurrence || undefined,
-      }) })
-      setTitle(''); setDesc(''); setAssignTo(''); setDue(''); setPriority('normal')
-      setWeight('normal'); setRecurrence(''); setReqConfirm(false); setReqAttach(false); setShowNew(false)
+      }
+      if (editId) await api(`/api/v1/tasks/${editId}`, { method: 'PATCH', body: JSON.stringify(payload) })
+      else await api('/api/v1/tasks', { method: 'POST', body: JSON.stringify(payload) })
+      closeForm()
       load()
-    } catch (e: any) { alert(e?.message || 'Não foi possível criar a tarefa.') }
+    } catch (e: any) { alert(e?.message || (editId ? 'Não foi possível guardar.' : 'Não foi possível criar a tarefa.')) }
     finally { setBusy(false) }
   }
 
@@ -2300,7 +2707,7 @@ function Tasks({ onBack, isOwner, myId }: { onBack: () => void; isOwner: boolean
         <h2 style={{ margin: 0, fontSize: 20 }}>Tarefas</h2>
         <div style={{ display: 'flex', gap: 6 }}>
           {isOwner && <button className="btn-ghost btn-sm" onClick={openReport} title="Relatório semanal"><i className="ti ti-report" aria-hidden="true"></i></button>}
-          <button className="btn-primary btn-sm" onClick={() => setShowNew(true)}><i className="ti ti-plus" aria-hidden="true"></i> Nova</button>
+          <button className="btn-primary btn-sm" onClick={() => { setEditId(null); setShowNew(true) }}><i className="ti ti-plus" aria-hidden="true"></i> Nova</button>
         </div>
       </div>
 
@@ -2311,6 +2718,7 @@ function Tasks({ onBack, isOwner, myId }: { onBack: () => void; isOwner: boolean
 
       {showNew && (
         <div className="task-form">
+          {editId && <div className="form-mode"><i className="ti ti-pencil" aria-hidden="true"></i> A editar uma tarefa existente</div>}
           <label className="fl">Tarefa <span className="req">*</span></label>
           <input value={title} onChange={e => setTitle(e.target.value)} placeholder="O que precisa de ser feito" />
           <label className="fl" style={{ marginTop: 12 }}>Detalhes (opcional)</label>
@@ -2350,9 +2758,9 @@ function Tasks({ onBack, isOwner, myId }: { onBack: () => void; isOwner: boolean
             Exige anexo (foto ou PDF) para concluir
           </label>
           <div className="rec-nav">
-            <button className="btn-ghost" onClick={() => setShowNew(false)}>Cancelar</button>
+            <button className="btn-ghost" onClick={closeForm}>Cancelar</button>
             <button className="btn-primary" disabled={busy || title.trim().length < 2 || !assignTo} onClick={create}>
-              {busy ? 'A criar…' : 'Criar tarefa'}
+              {busy ? 'A guardar…' : editId ? 'Guardar alterações' : 'Criar tarefa'}
             </button>
           </div>
         </div>
@@ -2396,6 +2804,11 @@ function Tasks({ onBack, isOwner, myId }: { onBack: () => void; isOwner: boolean
                   </button>
                 )}
                 {t.status === 'done' && <span className="task-check"><i className="ti ti-circle-check-filled" aria-hidden="true"></i></span>}
+                {t.status !== 'done' && (isOwner || t.assigned_by === myId) && (
+                  <button className="btn-ghost btn-sm" onClick={() => startEdit(t)} title="Editar tarefa">
+                    <i className="ti ti-pencil" aria-hidden="true"></i>
+                  </button>
+                )}
                 {tab === 'assigned' && t.status !== 'awaiting_confirmation' && (
                   <button className="btn-ghost btn-sm danger" onClick={() => removeTask(t)} title="Apagar"><i className="ti ti-trash" aria-hidden="true"></i></button>
                 )}
