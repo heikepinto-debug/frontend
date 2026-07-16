@@ -642,3 +642,25 @@ textarea { resize: vertical; line-height: 1.55; }
 .modal-card { background: var(--s2); border-radius: var(--radius); padding: 22px; max-width: 400px; width: 100%; box-shadow: var(--shadow-lg); }
 .modal-title { font-size: 16px; font-weight: 600; color: var(--ink); }
 .modal-detail { font-size: 13px; color: var(--ink-2); line-height: 1.5; margin-top: 8px; }
+
+/* ── Linha da lista: três zonas que quebram, não se atropelam ──
+   Antes era tudo numa fila só. Etiquetas com white-space:nowrap não
+   encolhem — quando o espaço faltava, o texto saía da caixa e ficava
+   por cima do vizinho. Agora: identificação | etiquetas | acções,
+   cada zona com o seu espaço, e a linha quebra quando é preciso. */
+.list-row { flex-wrap: wrap; }
+.list-main { flex: 1 1 180px; min-width: 0; }
+.list-main .list-name, .list-main .list-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex-shrink: 1; min-width: 0; max-width: 100%; }
+/* As etiquetas não encolhem o texto (nowrap), mas a zona delas tem de
+   caber: em ecrã estreito quebram para a linha seguinte em vez de sair. */
+.list-tags > * { flex-shrink: 0; max-width: 100%; }
+.list-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex-shrink: 0; margin-left: auto; }
+.jo-num { flex-shrink: 0; }
+.plate { flex-shrink: 0; }
+/* O estado deixa de ser minúsculo — é a informação mais consultada da linha */
+.status { font-size: 11px; }
+@media (max-width: 720px) {
+  .list-main { flex-basis: 100%; order: -1; }
+  .list-acts { margin-left: 0; }
+}

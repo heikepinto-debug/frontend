@@ -1525,12 +1525,13 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
             <div key={r.id} className={`list-row clickable ${isDraft ? 'is-draft' : ''}`}>
               <span className="jo-num" onClick={() => onOpen(r.id)}>{r.number}</span>
               <span className="plate" onClick={() => onOpen(r.id)}>{r.plate}</span>
-              <div style={{ flex: 1, minWidth: 0 }} onClick={() => onOpen(r.id)}>
+              <div className="list-main" onClick={() => onOpen(r.id)}>
                 <div className="list-name">{r.customer_name}
                   {(r.priority_level === 'urgent' || r.priority_level === 'high') && <span className={`list-prio p-${r.priority_level}`}>{r.priority_level === 'urgent' ? 'URGENTE' : 'ALTA'}</span>}
                 </div>
                 <div className="list-sub">{r.brand} {r.model}{isDraft ? '' : ` · ${r.photo_count} fotos${r.signed_at ? ' · assinada' : ''}`}</div>
               </div>
+              <div className="list-tags">
               {r.is_non_runner && <span className="badge-nr" title="Entrou sem funcionar"><i className="ti ti-engine-off" aria-hidden="true"></i> Não funciona</span>}
               {r.entry_pending_reason && !r.entry_completed_at && (
                 <span className="badge-incomplete" title={`Falta o km e as fotos do painel — ${r.entry_pending_reason}`}>
@@ -1544,6 +1545,8 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
                   : !r.signed_at
                     ? <span className="badge-unsigned" title="Finalização não chegou a selar a assinatura"><i className="ti ti-writing-off" aria-hidden="true"></i> Por assinar</span>
                     : <span className={`status s-${r.status}`}>{STATUS_LABEL[r.status] || r.status}</span>}
+              </div>
+              <div className="list-acts">
               {isDraft && (
                 <button className="btn-primary btn-sm" onClick={() => onResume(r.id)} title="Continuar lançamento">
                   Continuar <i className="ti ti-arrow-right" aria-hidden="true"></i>
@@ -1584,6 +1587,7 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
                   <i className="ti ti-trash" aria-hidden="true"></i>
                 </button>
               )}
+              </div>
             </div>
           )
         })}
