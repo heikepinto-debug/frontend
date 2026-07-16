@@ -436,7 +436,8 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   const [damages, setDamages] = useState<Damage[]>([])
   const [dmgGroup, setDmgGroup] = useState(0)
 
-  const [photos, setPhotos] = useState<Record<string, Blob>>({})
+  const [photos, setPhotos] = useState<Record<string, Blob>>({})          // por enviar (novas ou substituídas)
+  const [serverPhotos, setServerPhotos] = useState<Record<string, { id: string; url: string }>>({})  // já no servidor
   const [idDoc, setIdDoc] = useState<Blob | null>(null)   // foto do documento de identificação
 
   const [handedOff, setHandedOff] = useState(false)       // colaborador entregou o tablet ao cliente
@@ -467,11 +468,17 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   // Retomar rascunho: carrega e preenche os campos
   useEffect(() => {
     if (!resumeDraftId) return
-    api(`/api/v1/receptions/${resumeDraftId}/draft`).then(({ data: d }) => {
+    api(`/api/v1/receptions/${resumeDraftId}/draft`).then(({ data: d, photos: ps }) => {
+      // Fotos já enviadas neste rascunho — não se voltam a tirar nem a enviar.
+      const jaLa: Record<string, { id: string; url: string }> = {}
+      for (const p of (ps || [])) if (p.url) jaLa[p.zone] = { id: p.id, url: p.url }
+      setServerPhotos(jaLa)
       setExistingCust({ id: d.customer_id, full_name: d.customer_name, phone: d.customer_phone })
       setExistingVeh({ id: d.vehicle_id, plate: d.plate, brand: d.brand, model: d.model, year: d.year })
       setKm(d.km_entry != null ? String(d.km_entry) : '')
       setFuel(d.fuel_level ?? 2)
+      setIsNonRunner(!!d.is_non_runner)
+      if (d.entry_pending_reason) { setEntryPending(true); setPendingReason(d.entry_pending_reason) }
       setValuables(d.declared_valuables || '')
       setChecklist(typeof d.checklist === 'string' ? JSON.parse(d.checklist) : (d.checklist || {}))
       setBatteryRef(d.battery_reference || '')
@@ -510,8 +517,41 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
     try {
       const r = await api('/api/v1/receptions/draft', { method: 'POST', body: JSON.stringify(payload) })
       setDraftId(r.id)
+
+      // Enviar as fotos que ainda não subiram. Sem isto, as fotos vivem só na
+      // memória do telemóvel e perdem-se ao sair do ecrã — o trabalho todo.
+      // Só sobem as novas: as que já lá estão não se reenviam.
+      const porEnviar = Object.entries(photos)
+      const dmgPorEnviar = damages.filter(d => d.photo)
+      const total = porEnviar.length + dmgPorEnviar.length
+      if (total > 0) {
+        let done = 0
+        setProgress({ done: 0, total })
+        const subidas: Record<string, { id: string; url: string }> = {}
+        for (const [zone, blob] of porEnviar) {
+          const img = await compressImage(blob)
+          await uploadPhoto(r.id, zone, img, { isRequired: true })
+          subidas[zone] = { id: '', url: URL.createObjectURL(img) }
+          setProgress({ done: ++done, total })
+        }
+        for (const d of dmgPorEnviar) {
+          const img = await compressImage(d.photo!)
+          await uploadPhoto(r.id, `damage-${d.id}`, img)
+          subidas[`damage-${d.id}`] = { id: '', url: URL.createObjectURL(img) }
+          setProgress({ done: ++done, total })
+        }
+        // O que subiu deixa de estar "por enviar" — nem no finalizar, nem
+        // no próximo guardar. Uma foto sobe uma vez.
+        setServerPhotos(sp => ({ ...sp, ...subidas }))
+        setPhotos({})
+        setDamages(ds => ds.map(d => d.photo ? { ...d, photo: null } : d))
+        setProgress(null)
+      }
       setResult({ number: r.number, offline: false, draft: true } as any)
-    } catch { alert('Não foi possível guardar o rascunho.') }
+    } catch (e: any) {
+      setProgress(null)
+      alert(e?.message || 'Não foi possível guardar o rascunho.')
+    }
     finally { setSavingDraft(false) }
   }
 
@@ -560,10 +600,13 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   const setDmgNote = (id: string, note: string) =>
     setDamages(ds => ds.map(d => d.id === id ? { ...d, note } : d))
 
-  const reqCount = REQ_ZONES.filter(z => photos[z.key]).length
-  const wheelCount = WHEEL_ZONES.filter(z => photos[z.key]).length
-  const batteryCount = photos[BATTERY_ZONE.key] ? 1 : 0
-  const dashCount = DASH_ZONES.filter(z => photos[z.key]).length
+  // Uma zona conta como feita se tem foto nova por enviar OU já enviada.
+  const hasShot = (k: string) => !!photos[k] || !!serverPhotos[k]
+  const shotUrl = (k: string) => photos[k] ? URL.createObjectURL(photos[k]) : (serverPhotos[k]?.url || null)
+  const reqCount = REQ_ZONES.filter(z => hasShot(z.key)).length
+  const wheelCount = WHEEL_ZONES.filter(z => hasShot(z.key)).length
+  const batteryCount = hasShot(BATTERY_ZONE.key) ? 1 : 0
+  const dashCount = DASH_ZONES.filter(z => hasShot(z.key)).length
   const totalReq = reqCount + wheelCount + batteryCount + dashCount
   const allTc = tc.every(Boolean)
   // Detecta se o serviço envolve remap ou dyno (para o aviso específico)
@@ -628,7 +671,8 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       termsAcceptedAt: new Date().toISOString(),
     }
     const allReq = [...REQ_ZONES, ...WHEEL_ZONES, BATTERY_ZONE, ...DASH_ZONES]   // 14 fotos obrigatórias
-    // conta total de envios para a barra de progresso (fotos + danos + BI)
+    // Só sobem as que ainda não estão no servidor. Um rascunho retomado já
+    // tem as suas lá — reenviá-las seria pagar duas vezes a mesma factura em 3G.
     const reqPhotos = allReq.filter(z => photos[z.key])
     const damagePhotos = damages.filter(d => d.photo)
     const totalUploads = reqPhotos.length + damagePhotos.length + (idDoc ? 1 : 0)
@@ -1025,8 +1069,9 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
                     <textarea className="dmg-note" rows={1} value={d.note} onChange={e => setDmgNote(d.id, e.target.value)}
                       placeholder="Descreve o dano — ex: risco de 10cm, amolgadela funda…" />
                   </div>
-                  <button className={`dmg-photo ${d.photo ? 'filled' : ''}`} onClick={() => takePhoto(`__dmg__${d.id}`)}>
+                  <button className={`dmg-photo ${d.photo || serverPhotos[`damage-${d.id}`] ? 'filled' : ''}`} onClick={() => takePhoto(`__dmg__${d.id}`)}>
                     {d.photo ? <img src={URL.createObjectURL(d.photo)} alt="" />
+                      : serverPhotos[`damage-${d.id}`] ? <img src={serverPhotos[`damage-${d.id}`].url} alt="" />
                       : <><i className="ti ti-camera" style={{ fontSize: 16 }} aria-hidden="true"></i>Foto</>}
                   </button>
                   <span className="dmg-x" onClick={() => removeDamage(d.id)}><i className="ti ti-x" aria-hidden="true"></i></span>
@@ -1053,8 +1098,8 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
           <label className="fl">Volta ao carro — 360°</label>
           <div className="photo-grid">
             {REQ_ZONES.map(z => (
-              <button key={z.key} className={`photo-slot ${photos[z.key] ? 'done' : ''}`} onClick={() => takePhoto(z.key)}>
-                {photos[z.key] ? <img src={URL.createObjectURL(photos[z.key])} alt={z.label} /> : <span className="photo-icon"><i className="ti ti-camera" aria-hidden="true"></i></span>}
+              <button key={z.key} className={`photo-slot ${hasShot(z.key) ? 'done' : ''}`} onClick={() => takePhoto(z.key)}>
+                {hasShot(z.key) ? <img src={shotUrl(z.key)!} alt={z.label} /> : <span className="photo-icon"><i className="ti ti-camera" aria-hidden="true"></i></span>}
                 <span>{z.label}</span>
               </button>
             ))}
@@ -1063,8 +1108,8 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
           <label className="fl" style={{ marginTop: 18 }}>Rodas — porcas em detalhe</label>
           <div className="photo-grid">
             {WHEEL_ZONES.map(z => (
-              <button key={z.key} className={`photo-slot ${photos[z.key] ? 'done' : ''}`} onClick={() => takePhoto(z.key)}>
-                {photos[z.key] ? <img src={URL.createObjectURL(photos[z.key])} alt={z.label} /> : <span className="photo-icon"><i className="ti ti-camera" aria-hidden="true"></i></span>}
+              <button key={z.key} className={`photo-slot ${hasShot(z.key) ? 'done' : ''}`} onClick={() => takePhoto(z.key)}>
+                {hasShot(z.key) ? <img src={shotUrl(z.key)!} alt={z.label} /> : <span className="photo-icon"><i className="ti ti-camera" aria-hidden="true"></i></span>}
                 <span>{z.label}</span>
               </button>
             ))}
@@ -1072,8 +1117,8 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
 
           <label className="fl" style={{ marginTop: 18 }}>Bateria</label>
           <div className="grid2" style={{ alignItems: 'start' }}>
-            <button className={`photo-slot ${photos[BATTERY_ZONE.key] ? 'done' : ''}`} onClick={() => takePhoto(BATTERY_ZONE.key)}>
-              {photos[BATTERY_ZONE.key] ? <img src={URL.createObjectURL(photos[BATTERY_ZONE.key])} alt="bateria" /> : <span className="photo-icon"><i className="ti ti-battery" aria-hidden="true"></i></span>}
+            <button className={`photo-slot ${hasShot(BATTERY_ZONE.key) ? 'done' : ''}`} onClick={() => takePhoto(BATTERY_ZONE.key)}>
+              {hasShot(BATTERY_ZONE.key) ? <img src={shotUrl(BATTERY_ZONE.key)!} alt="bateria" /> : <span className="photo-icon"><i className="ti ti-battery" aria-hidden="true"></i></span>}
               <span>{BATTERY_ZONE.label}</span>
             </button>
             <div>
@@ -1091,10 +1136,10 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
           )}
           <div className={`dash-grid ${entryPending ? 'deferred' : ''}`}>
             {DASH_ZONES.map(z => (
-              <button key={z.key} className={`photo-slot dash ${photos[z.key] ? 'done' : ''}`} onClick={() => takePhoto(z.key)}>
-                {photos[z.key] ? <img src={URL.createObjectURL(photos[z.key])} alt={z.label} /> : <span className="photo-icon"><i className="ti ti-camera" aria-hidden="true"></i></span>}
+              <button key={z.key} className={`photo-slot dash ${hasShot(z.key) ? 'done' : ''}`} onClick={() => takePhoto(z.key)}>
+                {hasShot(z.key) ? <img src={shotUrl(z.key)!} alt={z.label} /> : <span className="photo-icon"><i className="ti ti-camera" aria-hidden="true"></i></span>}
                 <span className="dash-label">{z.label}</span>
-                {!photos[z.key] && <span className="dash-hint">{z.hint}</span>}
+                {!hasShot(z.key) && <span className="dash-hint">{z.hint}</span>}
               </button>
             ))}
           </div>
