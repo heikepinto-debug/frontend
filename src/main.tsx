@@ -1369,6 +1369,8 @@ const STATUS_LABEL: Record<string, string> = {
   draft: 'Rascunho',
   reception: 'Em recepção',
   awaiting_diagnosis: 'Aguarda diagnóstico',
+  in_diagnosis: 'Em diagnóstico',
+  diagnosis_review: 'Aguarda autorização',
   awaiting_quote: 'Aguarda orçamento',
   quote_sent: 'Orçamento enviado',
   approved: 'Aprovado',
@@ -2251,6 +2253,40 @@ function Bookings({ onBack, onResume }: { onBack: () => void; onResume: (id: str
   )
 }
 
+// ── AVISOS DENTRO DA APLICAÇÃO ───────────────────────────────
+// Os diálogos do navegador (alert/confirm) são uma armadilha em
+// telemóvel: depois de alguns, o browser oferece "impedir esta página
+// de criar mais diálogos". Se o utilizador aceitar, o alert deixa de
+// aparecer E o confirm passa a devolver FALSO em silêncio — a app fica
+// muda e os botões deixam de responder, sem explicação nenhuma.
+// Por isso: mensagens e confirmações vivem dentro da aplicação.
+function Banner({ msg, onClose }: { msg: { kind: 'err' | 'ok'; text: string } | null; onClose: () => void }) {
+  if (!msg) return null
+  return (
+    <div className={`banner ${msg.kind}`} role="status">
+      <i className={`ti ${msg.kind === 'err' ? 'ti-alert-circle' : 'ti-circle-check'}`} aria-hidden="true"></i>
+      <span>{msg.text}</span>
+      <button className="banner-x" onClick={onClose} aria-label="Fechar"><i className="ti ti-x" aria-hidden="true"></i></button>
+    </div>
+  )
+}
+
+function ConfirmBox({ ask, onYes, onNo }: { ask: { text: string; detail?: string; danger?: boolean; yes?: string } | null; onYes: () => void; onNo: () => void }) {
+  if (!ask) return null
+  return (
+    <div className="modal-scrim" onClick={onNo}>
+      <div className="modal-card" onClick={e => e.stopPropagation()}>
+        <div className="modal-title">{ask.text}</div>
+        {ask.detail && <p className="modal-detail">{ask.detail}</p>}
+        <div className="rec-nav" style={{ marginTop: 18 }}>
+          <button className="btn-ghost" onClick={onNo}>Cancelar</button>
+          <button className={ask.danger ? 'btn-ghost danger' : 'btn-primary'} onClick={onYes}>{ask.yes || 'Confirmar'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── ORDEM DE SERVIÇO — Fatia 1: Diagnóstico ──────────────────
 function OrderService({ joId, onBack, myId, isOwner }: { joId: string; onBack: () => void; myId: string; isOwner: boolean }) {
   const [data, setData] = useState<any>(null)
@@ -2278,7 +2314,7 @@ function OrderService({ joId, onBack, myId, isOwner }: { joId: string; onBack: (
   const startOS = async () => {
     setStarting(true)
     try { await api(`/api/v1/os/start/${joId}`, { method: 'POST' }); load() }
-    catch (e: any) { alert(e?.message || 'Não foi possível iniciar a OS.') }
+    catch (e: any) { say('err', e?.message || 'Não foi possível iniciar a OS.') }
     finally { setStarting(false) }
   }
 
@@ -2286,6 +2322,9 @@ function OrderService({ joId, onBack, myId, isOwner }: { joId: string; onBack: (
   const problems = data?.problems || []
   const isDiag = jo?.status === 'in_diagnosis'
   const [acting, setActing] = useState(false)      // trava toques repetidos em 3G
+  const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
+  const [ask, setAsk] = useState<{ text: string; detail?: string; danger?: boolean; yes?: string; run: () => void } | null>(null)
+  const say = (kind: 'err' | 'ok', text: string) => { setMsg({ kind, text }); if (kind === 'ok') setTimeout(() => setMsg(null), 4000) }
   const isReview = jo?.status === 'diagnosis_review'
   const authOn = data?.diagAuthorizationOn
   const iSubmitted = jo?.diag_submitted_by === myId
@@ -2315,6 +2354,7 @@ function OrderService({ joId, onBack, myId, isOwner }: { joId: string; onBack: (
           <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Recepções</button>
           <h2 style={{ margin: 0, fontSize: 18 }}>{jo.number}</h2><span />
         </div>
+        <Banner msg={msg} onClose={() => setMsg(null)} />
         <div className="os-start-card">
           <div className="os-start-ic"><i className="ti ti-tools" aria-hidden="true"></i></div>
           <h2>Iniciar Ordem de Serviço</h2>
@@ -2330,20 +2370,26 @@ function OrderService({ joId, onBack, myId, isOwner }: { joId: string; onBack: (
   const addProblem = async () => {
     if (newProblem.trim().length < 2 || acting) return
     setActing(true)
+    setMsg(null)
     try { await api(`/api/v1/os/${joId}/problems`, { method: 'POST', body: JSON.stringify({ description: newProblem, origin: 'team' }) }); setNewProblem(''); await load() }
-    catch { alert('Não foi possível adicionar.') }
+    catch (e: any) { say('err', e?.message || 'Não foi possível adicionar o problema. Verifica a ligação e tenta outra vez.') }
     finally { setActing(false) }
   }
   const updateProblem = async (pid: string, fields: any) => {
     try { await api(`/api/v1/os/problems/${pid}`, { method: 'POST', body: JSON.stringify(fields) }); load() }
-    catch { alert('Erro ao actualizar.') }
+    catch (e: any) { say('err', e?.message || 'Não foi possível guardar a alteração.') }
   }
-  const deleteProblem = async (pid: string) => {
+  const deleteProblem = (pid: string) => {
     if (acting) return
-    if (!confirm('Apagar este problema?')) return
-    setActing(true)
-    try { await api(`/api/v1/os/problems/${pid}`, { method: 'DELETE' }); await load() } catch { alert('Erro.') }
-    finally { setActing(false) }
+    setAsk({
+      text: 'Apagar este problema?', danger: true, yes: 'Apagar',
+      run: async () => {
+        setActing(true)
+        try { await api(`/api/v1/os/problems/${pid}`, { method: 'DELETE' }); await load() }
+        catch (e: any) { say('err', e?.message || 'Não foi possível apagar.') }
+        finally { setActing(false) }
+      },
+    })
   }
   const addPhoto = async (pid: string) => {
     const input = document.createElement('input')
@@ -2355,42 +2401,56 @@ function OrderService({ joId, onBack, myId, isOwner }: { joId: string; onBack: (
         const r = await api(`/api/v1/os/problems/${pid}/photo-url`, { method: 'POST', body: JSON.stringify({ ext }) })
         await fetch(r.uploadUrl, { method: 'PUT', body: f, headers: { 'Content-Type': f.type } })
         load()
-      } catch { alert('Não foi possível anexar a foto.') }
+      } catch (e: any) { say('err', e?.message || 'Não foi possível anexar a foto.') }
     }
     input.click()
   }
-  const submitDiagnosis = async () => {
+  // Porta de sentido único: tranca a lista de problemas e passa a depender
+  // de outra pessoa. Não pode ir a um toque distraído — daí a confirmação.
+  const submitDiagnosis = () => {
     if (acting) return
-    // Porta de sentido único: tranca a lista de problemas e passa a
-    // depender de outra pessoa. Não pode ir a um toque distraído.
-    if (!confirm(`Submeter o diagnóstico de ${problems.length} problema${problems.length > 1 ? 's' : ''}?\n\nA lista fica trancada à espera de autorização. Podes retirar a submissão enquanto ninguém a autorizar.`)) return
-    setActing(true)
-    try {
-      const r = await api(`/api/v1/os/${joId}/submit-diagnosis`, { method: 'POST', body: JSON.stringify({ notes: notes || undefined }) })
-      alert(r.status === 'diagnosis_review' ? 'Diagnóstico submetido para autorização.' : 'Diagnóstico concluído. OS pronta para orçamento.')
-      await load()
-    } catch (e: any) { alert(e?.message || 'Não foi possível submeter.') }
-    finally { setActing(false) }
+    setAsk({
+      text: `Submeter o diagnóstico de ${problems.length} problema${problems.length > 1 ? 's' : ''}?`,
+      detail: authOn
+        ? 'A lista fica trancada à espera de autorização. Se te enganares, podes retirar a submissão enquanto ninguém a autorizar.'
+        : 'O diagnóstico fica concluído e a OS segue para orçamento.',
+      yes: 'Submeter',
+      run: async () => {
+        setActing(true); setMsg(null)
+        try {
+          const r = await api(`/api/v1/os/${joId}/submit-diagnosis`, { method: 'POST', body: JSON.stringify({ notes: notes || undefined }) })
+          say('ok', r.status === 'diagnosis_review' ? 'Diagnóstico submetido para autorização.' : 'Diagnóstico concluído. OS pronta para orçamento.')
+          await load()
+        } catch (e: any) { say('err', e?.message || 'Não foi possível submeter. Verifica a ligação e tenta outra vez.') }
+        finally { setActing(false) }
+      },
+    })
   }
 
   // Retirar a submissão — a saída para quem submeteu por engano.
-  const withdrawDiagnosis = async () => {
+  const withdrawDiagnosis = () => {
     if (acting) return
-    if (!confirm('Retirar a submissão?\n\nO diagnóstico volta a ficar editável para corrigires. Depois submetes outra vez.')) return
-    setActing(true)
-    try { await api(`/api/v1/os/${joId}/withdraw-diagnosis`, { method: 'POST' }); await load() }
-    catch (e: any) { alert(e?.message || 'Não foi possível retirar.') }
-    finally { setActing(false) }
+    setAsk({
+      text: 'Retirar a submissão?',
+      detail: 'O diagnóstico volta a ficar editável para corrigires. Depois submetes outra vez.',
+      yes: 'Retirar',
+      run: async () => {
+        setActing(true)
+        try { await api(`/api/v1/os/${joId}/withdraw-diagnosis`, { method: 'POST' }); await load(); say('ok', 'Submissão retirada. Podes corrigir e submeter outra vez.') }
+        catch (e: any) { say('err', e?.message || 'Não foi possível retirar.') }
+        finally { setActing(false) }
+      },
+    })
   }
   const authorize = async () => {
     if (!authSig) return
-    try { await api(`/api/v1/os/${joId}/authorize-diagnosis`, { method: 'POST', body: JSON.stringify({ approve: true, signature: authSig }) }); setShowAuth(false); load() }
-    catch (e: any) { alert(e?.message || 'Erro ao autorizar.') }
+    try { await api(`/api/v1/os/${joId}/authorize-diagnosis`, { method: 'POST', body: JSON.stringify({ approve: true, signature: authSig }) }); setShowAuth(false); load(); say('ok', 'Diagnóstico autorizado.') }
+    catch (e: any) { say('err', e?.message || 'Não foi possível autorizar.') }
   }
   const reject = async () => {
     if (!rejectNote.trim()) return
-    try { await api(`/api/v1/os/${joId}/authorize-diagnosis`, { method: 'POST', body: JSON.stringify({ approve: false, note: rejectNote }) }); setRejecting(false); setRejectNote(''); load() }
-    catch (e: any) { alert(e?.message || 'Erro.') }
+    try { await api(`/api/v1/os/${joId}/authorize-diagnosis`, { method: 'POST', body: JSON.stringify({ approve: false, note: rejectNote }) }); setRejecting(false); setRejectNote(''); load(); say('ok', 'Diagnóstico recusado e devolvido.') }
+    catch (e: any) { say('err', e?.message || 'Não foi possível recusar.') }
   }
 
   return (
@@ -2406,6 +2466,8 @@ function OrderService({ joId, onBack, myId, isOwner }: { joId: string; onBack: (
         <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Recepções</button>
         <h2 style={{ margin: 0, fontSize: 18 }}>OS {jo.number}</h2><span />
       </div>
+      <Banner msg={msg} onClose={() => setMsg(null)} />
+      <ConfirmBox ask={ask} onNo={() => setAsk(null)} onYes={() => { const r = ask?.run; setAsk(null); r?.() }} />
 
       <div className="os-status-bar">
         <span className="os-veh">{jo.brand} {jo.model} · {jo.plate}</span>
