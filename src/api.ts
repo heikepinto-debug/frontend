@@ -4,7 +4,11 @@
 import { openDB } from 'idb'
 import { useSession } from './session'
 
-const API = import.meta.env.VITE_API_URL || ''
+// Sem VITE_API_URL o pedido ia para o próprio domínio e a Vercel devolvia a
+// sua página 404 em HTML — dando "Unexpected token 'T'... is not valid JSON",
+// que não diz nada a ninguém. Falhar alto e claro vale mais que adivinhar.
+export const API = import.meta.env.VITE_API_URL || ''
+export const API_EM_FALTA = !API
 
 // ── Fetch autenticado com refresh automático ─────────────────
 export async function api(path: string, opts: RequestInit = {}): Promise<any> {

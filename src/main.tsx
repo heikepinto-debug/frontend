@@ -6,7 +6,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createRoot } from 'react-dom/client'
 import { useSession } from './session'
-import { api, offline, uploadPhoto, startAutoSync } from './api'
+import { api, offline, uploadPhoto, startAutoSync, API, API_EM_FALTA } from './api'
 import { registerSW } from 'virtual:pwa-register'
 import './styles.css'
 
@@ -44,7 +44,8 @@ function Login() {
     e.preventDefault()
     setBusy(true); setErr('')
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/auth/login`, {
+      if (API_EM_FALTA) throw new Error('Configuração em falta: VITE_API_URL não foi definida no build. Avisa quem faz o deploy — não é problema da tua senha.')
+      const res = await fetch(`${API}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),

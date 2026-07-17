@@ -14,6 +14,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Registamos à mão no main.tsx para poder verificar actualizações e
+      // avisar o utilizador. Sem isto o plugin injectava um segundo registo.
+      injectRegister: null,
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         navigateFallback: '/index.html',
