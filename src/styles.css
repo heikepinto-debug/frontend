@@ -664,3 +664,40 @@ textarea { resize: vertical; line-height: 1.55; }
   .list-main { flex-basis: 100%; order: -1; }
   .list-acts { margin-left: 0; }
 }
+
+/* ── Sistemas verificados à entrada (vista de detalhe) ────── */
+.sys-det { display: flex; flex-direction: column; gap: 1px; }
+.sys-det-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.sys-det-row:last-child { border-bottom: none; }
+.sys-det-name { color: var(--ink-2); }
+.sys-det-val { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 20px; white-space: nowrap; }
+.sys-det-row.v-ok .sys-det-val { background: #DCFCE7; color: #15803D; }
+.sys-det-row.v-fail .sys-det-val { background: var(--danger-bg); color: var(--danger); }
+.sys-det-row.v-untested .sys-det-val { background: #F3F4F6; color: #6B7280; }
+@media (prefers-color-scheme: dark) {
+  .sys-det-row.v-ok .sys-det-val { background: rgba(22,163,74,.2); }
+  .sys-det-row.v-untested .sys-det-val { background: rgba(156,163,175,.2); }
+}
+/* ── Documento de identificação (vista de detalhe) ────────── */
+.det-iddoc { display: block; width: 100%; max-width: 300px; margin-top: 10px; padding: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: none; cursor: pointer; transition: border-color .15s; }
+.det-iddoc:hover { border-color: var(--brand); }
+.det-iddoc img { width: 100%; display: block; }
+
+/* ── Ligações entre entrada e OS ──────────────────────────── */
+.det-link { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 12px; padding: 12px 14px;
+  background: var(--brand-bg); border: 1px solid var(--brand-border); border-radius: var(--radius-sm);
+  color: var(--brand-dark); font-size: 14px; font-weight: 500; cursor: pointer; text-align: left; transition: border-color .15s; }
+.det-link:hover { border-color: var(--brand); }
+.det-link span { flex: 1; }
+.det-link i { font-size: 18px; flex-shrink: 0; }
+/* ── Histórico do carro (outras visitas) ──────────────────── */
+.hist-list { display: flex; flex-direction: column; gap: 8px; }
+.hist-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; background: var(--s1);
+  border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; text-align: left; transition: border-color .15s; }
+.hist-row:hover { border-color: var(--brand-border); }
+.hist-main { flex: 1; min-width: 0; }
+.hist-top { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.hist-num { font-size: 13px; font-weight: 600; color: var(--brand); }
+.hist-sub { font-size: 12px; color: var(--ink-3); margin-top: 3px; }
+.hist-what { font-size: 13px; color: var(--ink-2); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hist-row > i { color: var(--ink-3); flex-shrink: 0; }

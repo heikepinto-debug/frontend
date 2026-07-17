@@ -79,7 +79,7 @@ function Shell() {
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
-  const [osReturnTo, setOsReturnTo] = useState<'list' | 'authorizations'>('list')
+  const [osReturnTo, setOsReturnTo] = useState<'list' | 'authorizations' | 'detail'>('list')
   const [signId, setSignId] = useState<string | undefined>(undefined)
   const [completeId, setCompleteId] = useState<string | undefined>(undefined)
   const [bookingCount, setBookingCount] = useState(0)
@@ -258,9 +258,12 @@ function Shell() {
       {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
         onSign={(id: string) => { setSignId(id); setView('sign') }}
         onComplete={(id: string) => { setCompleteId(id); setView('complete') }} />}
-      {view === 'detail' && detailId && <ReceptionDetail joId={detailId} onBack={() => setView('list')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} isOwner={isOwner} />}
+      {view === 'detail' && detailId && <ReceptionDetail joId={detailId} onBack={() => setView('list')}
+        onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} isOwner={isOwner}
+        onOpenOther={(id: string) => setDetailId(id)}
+        onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('detail'); setView('os') }} />}
       {view === 'bookings' && <Bookings onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} />}
-      {view === 'os' && osId && <OrderService joId={osId} onBack={() => setView(osReturnTo)} myId={user?.id || ''} isOwner={isOwner} />}
+      {view === 'os' && osId && <OrderService joId={osId} onBack={() => setView(osReturnTo)} myId={user?.id || ''} isOwner={isOwner} onOpenEntry={(id: string) => { setDetailId(id); setView('detail') }} />}
       {view === 'authorizations' && <Authorizations onBack={() => setView('home')} onOpen={(id: string) => { setOsId(id); setOsReturnTo('authorizations'); setView('os') }} />}
       {view === 'sign' && signId && <CompleteSignature joId={signId} onBack={() => setView('list')} onDone={() => { setSignId(undefined); setView('list') }} />}
       {view === 'complete' && completeId && <CompleteEntry joId={completeId} onBack={() => setView('list')} onDone={() => { setCompleteId(undefined); setView('list') }} />}
@@ -1600,7 +1603,7 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
 }
 
 // ── DETALHE DA RECEPÇÃO (ver informação registada) ───────────
-function ReceptionDetail({ joId, onBack, onResume, isOwner }: { joId: string; onBack: () => void; onResume: (id: string) => void; isOwner: boolean }) {
+function ReceptionDetail({ joId, onBack, onResume, isOwner, onOpenOther, onOpenOS }: { joId: string; onBack: () => void; onResume: (id: string) => void; isOwner: boolean; onOpenOther?: (id: string) => void; onOpenOS?: (id: string) => void }) {
   const [jo, setJo] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [photo, setPhoto] = useState<string | null>(null)  // foto ampliada
@@ -1630,6 +1633,9 @@ function ReceptionDetail({ joId, onBack, onResume, isOwner }: { joId: string; on
   const asObj = (v: any) => typeof v === 'string' ? (() => { try { return JSON.parse(v) } catch { return {} } })() : (v || {})
   const intentions: string[] = asArr(jo.intentions)
   const damages: any[] = asArr(jo.damage_zones)
+  // Sistemas verificados à entrada — só mostra os que foram mesmo avaliados.
+  const sysRaw = typeof jo.systems_check === 'string' ? JSON.parse(jo.systems_check || '{}') : (jo.systems_check || {})
+  const sysEntries: [string, string][] = Object.entries(sysRaw).filter(([, v]) => !!v) as [string, string][]
   const checklist = asObj(jo.checklist)
   const items = Object.keys(checklist).filter(k => checklist[k])
   const fmt = (s?: string) => s ? new Date(s).toLocaleString('pt-PT') : '—'
@@ -1661,6 +1667,13 @@ function ReceptionDetail({ joId, onBack, onResume, isOwner }: { joId: string; on
       <div className="det-section">
         <div className="det-section-title">Estado</div>
         <Row label="Situação" value={STATUS_LABEL[jo.status] || jo.status} />
+        {jo.os_opened_at && onOpenOS && (
+          <button className="det-link" onClick={() => onOpenOS(joId)}>
+            <i className="ti ti-clipboard-list" aria-hidden="true"></i>
+            <span>Ver a Ordem de Serviço deste carro</span>
+            <i className="ti ti-chevron-right" aria-hidden="true"></i>
+          </button>
+        )}
         {jo.booking_date && <Row label="Marcação" value={fmt(jo.booking_date)} />}
         {jo.received_at && !isDraft && <Row label="Entrada" value={fmt(jo.received_at)} />}
         {jo.signer_is_owner === false && jo.signer_name && <Row label="Entregue por" value={`${jo.signer_name} (não é o dono)`} />}
@@ -1735,8 +1748,13 @@ function ReceptionDetail({ joId, onBack, onResume, isOwner }: { joId: string; on
         <Row label="Matrícula" value={jo.plate} />
         {jo.year && <Row label="Ano" value={jo.year} />}
         {jo.color && <Row label="Cor" value={jo.color} />}
-        <Row label="Quilometragem" value={jo.km_entry != null ? `${MZmt(jo.km_entry)} km` : '—'} />
+        {jo.vin && <Row label="VIN / Chassi" value={jo.vin} />}
+        <Row label="Quilometragem" value={
+          jo.km_entry != null ? `${MZmt(jo.km_entry)} km`
+            : jo.entry_pending_reason ? 'Por registar' : '—'} />
         <Row label="Combustível" value={fuel} />
+        {jo.battery_reference && <Row label="Referência da bateria" value={jo.battery_reference} />}
+        {jo.is_non_runner && <Row label="Entrou a funcionar?" value="Não — entrou sem funcionar" />}
       </div>
 
       <div className="det-section">
@@ -1751,7 +1769,38 @@ function ReceptionDetail({ joId, onBack, onResume, isOwner }: { joId: string; on
         <div className="det-section-title">Estado e itens declarados</div>
         <Row label="Itens presentes" value={items.length ? items.join(', ') : 'Nenhum'} />
         <Row label="Objectos declarados" value={jo.declared_valuables} />
+        {jo.wants_old_parts != null && (
+          <Row label="Quer as peças antigas?" value={jo.wants_old_parts ? 'Sim — guardar e devolver' : 'Não'} />
+        )}
       </div>
+
+      {/* Verificação de sistemas à entrada — é isto que responde a
+          "o ar condicionado já não funcionava quando o carro chegou". */}
+      {sysEntries.length > 0 && (
+        <div className="det-section">
+          <div className="det-section-title">Sistemas verificados à entrada</div>
+          <div className="sys-det">
+            {sysEntries.map(([nome, estado]) => (
+              <div key={nome} className={`sys-det-row v-${estado}`}>
+                <span className="sys-det-name">{nome}</span>
+                <span className="sys-det-val">
+                  <i className={`ti ${estado === 'ok' ? 'ti-check' : estado === 'fail' ? 'ti-x' : 'ti-minus'}`} aria-hidden="true"></i>
+                  {estado === 'ok' ? 'Funciona' : estado === 'fail' ? 'Não funciona' : 'Não testado'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {jo.entry_pending_reason && (
+        <div className="det-section">
+          <div className="det-section-title">Entrada incompleta</div>
+          <Row label="Motivo" value={jo.entry_pending_reason} />
+          <Row label="Completada" value={jo.entry_completed_at ? fmt(jo.entry_completed_at) : 'Ainda não'} />
+          {jo.entry_completed_by_name && <Row label="Por" value={jo.entry_completed_by_name} />}
+        </div>
+      )}
 
       {damages.length > 0 && (
         <div className="det-section">
@@ -1775,6 +1824,57 @@ function ReceptionDetail({ joId, onBack, onResume, isOwner }: { joId: string; on
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {(jo.historico?.length > 0) && (
+        <div className="det-section">
+          <div className="det-section-title">Outras visitas deste carro ({jo.historico.length})</div>
+          <div className="hist-list">
+            {jo.historico.map((h: any) => {
+              const its = asArr(h.intentions)
+              return (
+                <button key={h.id} className="hist-row" onClick={() => onOpenOther?.(h.id)}>
+                  <div className="hist-main">
+                    <div className="hist-top">
+                      <span className="hist-num">{h.number}</span>
+                      <span className={`status s-${h.status}`}>{STATUS_LABEL[h.status] || h.status}</span>
+                    </div>
+                    <div className="hist-sub">
+                      {h.received_at ? fmt(h.received_at) : 'Sem data'}
+                      {h.km_entry != null ? ` · ${MZmt(h.km_entry)} km` : ''}
+                    </div>
+                    {its.length > 0 && <div className="hist-what">{its.join(' · ')}</div>}
+                  </div>
+                  <i className="ti ti-chevron-right" aria-hidden="true"></i>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {(jo.idDocViewUrl || jo.signer_bi_number) && (
+        <div className="det-section">
+          <div className="det-section-title">Documento de identificação</div>
+          {jo.signer_bi_number && <Row label="Número" value={jo.signer_bi_number} />}
+          {jo.idDocViewUrl && (
+            <button className="det-iddoc" onClick={() => setPhoto(jo.idDocViewUrl)} title="Ver documento">
+              <img src={jo.idDocViewUrl} alt="Documento de identificação" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {(jo.terms_accepted_at || jo.non_runner_accepted_at) && (
+        <div className="det-section">
+          <div className="det-section-title">Termos aceites</div>
+          {jo.terms_accepted_at && (
+            <Row label={`Termos gerais${jo.terms_version ? ` (v${jo.terms_version})` : ''}`} value={fmt(jo.terms_accepted_at)} />
+          )}
+          {jo.non_runner_accepted_at && (
+            <Row label="Termos de veículo sem funcionar" value={fmt(jo.non_runner_accepted_at)} />
+          )}
         </div>
       )}
 
@@ -2337,7 +2437,7 @@ function ConfirmBox({ ask, onYes, onNo }: { ask: { text: string; detail?: string
 }
 
 // ── ORDEM DE SERVIÇO — Fatia 1: Diagnóstico ──────────────────
-function OrderService({ joId, onBack, myId, isOwner }: { joId: string; onBack: () => void; myId: string; isOwner: boolean }) {
+function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: string; onBack: () => void; myId: string; isOwner: boolean; onOpenEntry?: (id: string) => void }) {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState(false)
@@ -2515,6 +2615,13 @@ function OrderService({ joId, onBack, myId, isOwner }: { joId: string; onBack: (
         <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Recepções</button>
         <h2 style={{ margin: 0, fontSize: 18 }}>OS {jo.number}</h2><span />
       </div>
+      {onOpenEntry && (
+        <button className="det-link" style={{ marginBottom: 12 }} onClick={() => onOpenEntry(joId)}>
+          <i className="ti ti-file-description" aria-hidden="true"></i>
+          <span>Ver o que foi registado à entrada</span>
+          <i className="ti ti-chevron-right" aria-hidden="true"></i>
+        </button>
+      )}
       <Banner msg={msg} onClose={() => setMsg(null)} />
       <ConfirmBox ask={ask} onNo={() => setAsk(null)} onYes={() => { const r = ask?.run; setAsk(null); r?.() }} />
 
