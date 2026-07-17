@@ -7,7 +7,28 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { createRoot } from 'react-dom/client'
 import { useSession } from './session'
 import { api, offline, uploadPhoto, startAutoSync } from './api'
+import { registerSW } from 'virtual:pwa-register'
 import './styles.css'
+
+// ── Actualização da aplicação ────────────────────────────────
+// Sem isto o service worker nunca é registado nem verificado: quem
+// deixa o separador aberto (toda a gente, no telemóvel) fica preso a
+// uma versão antiga para sempre — a testar código que já não existe.
+// Verifica-se a cada 20 minutos e sempre que a app volta à frente.
+let aplicarUpdate: ((recarregar?: boolean) => void) | null = null
+const updateSW = registerSW({
+  immediate: true,
+  onRegisteredSW(_url, r) {
+    if (!r) return
+    const verificar = () => { if (navigator.onLine) r.update().catch(() => {}) }
+    setInterval(verificar, 20 * 60 * 1000)
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) verificar() })
+  },
+  onNeedRefresh() {
+    aplicarUpdate = updateSW
+    window.dispatchEvent(new CustomEvent('oh:update-pronto'))
+  },
+})
 
 // ────────────────────────────────────────────────────────────
 // LOGIN — marca OficinaHub (neutra); tenant branding vem depois
@@ -75,6 +96,7 @@ function Shell() {
   const canDo = useSession(s => s.can)
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
+  const [temUpdate, setTemUpdate] = useState(false)   // há versão nova à espera
   const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
@@ -91,11 +113,29 @@ function Shell() {
     window.addEventListener('online', on); window.addEventListener('offline', off)
     startAutoSync(() => offline.pendingCount().then(setPending))
     const t = setInterval(() => offline.pendingCount().then(setPending), 5000)
-    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); clearInterval(t) }
+    // Versão nova disponível.
+    const up = () => setTemUpdate(true)
+    window.addEventListener('oh:update-pronto', up)
+    return () => {
+      window.removeEventListener('online', on); window.removeEventListener('offline', off)
+      window.removeEventListener('oh:update-pronto', up); clearInterval(t)
+    }
   }, [])
 
   const [summary, setSummary] = useState<any>(null)
   const [navOpen, setNavOpen] = useState(false)  // menu no telemóvel
+
+  // Ecrãs onde recarregar destrói trabalho não enviado (fotos e assinatura
+  // vivem só na memória até subirem). Em qualquer outro, actualiza-se sozinho.
+  const ECRAS_ARRISCADOS = ['reception', 'complete', 'sign']
+  useEffect(() => {
+    if (!temUpdate) return
+    if (ECRAS_ARRISCADOS.includes(view)) return    // espera que ele saia daqui
+    // Fora de perigo: aplica agora, sem perguntar. Um segundo de espera
+    // vale mais do que alguém a trabalhar semanas com código velho.
+    const t = setTimeout(() => window.location.reload(), 1200)
+    return () => clearTimeout(t)
+  }, [temUpdate, view])
 
   // Contadores e resumo do painel — actualiza ao voltar ao início
   useEffect(() => {
@@ -126,6 +166,19 @@ function Shell() {
 
   return (
     <div className="app-shell">
+      {temUpdate && (
+        <div className="update-bar" role="status">
+          <i className="ti ti-refresh" aria-hidden="true"></i>
+          <span>{ECRAS_ARRISCADOS.includes(view)
+            ? 'Há uma versão nova. Termina o que estás a fazer — actualiza sozinha quando saíres deste ecrã.'
+            : 'A actualizar para a versão nova…'}</span>
+          {ECRAS_ARRISCADOS.includes(view) && (
+            <button onClick={() => { if (confirm('Actualizar agora? Perdes o que ainda não foi enviado.')) window.location.reload() }}>
+              Actualizar já
+            </button>
+          )}
+        </div>
+      )}
       {/* Sidebar (PC/tablet fixa; telemóvel abre por cima) */}
       {navOpen && <div className="nav-scrim" onClick={() => setNavOpen(false)} />}
       <aside className={`sidebar ${navOpen ? 'open' : ''}`}>
@@ -150,6 +203,7 @@ function Shell() {
         </nav>
 
         <div className="sidebar-foot">
+          <div className="sidebar-ver" title="Versão desta aplicação">v{__APP_VERSION__}</div>
           <button className={`nav-item ${view === 'password' ? 'active' : ''}`} onClick={() => go('password')}>
             <i className="ti ti-key" aria-hidden="true"></i><span className="nav-label">A minha senha</span>
           </button>
@@ -302,6 +356,12 @@ const DASH_ZONES = [
   { key: 'dash_run', label: 'Painel: motor ON', hint: 'O que fica aceso a trabalhar' },
   { key: 'km', label: 'Conta-km em foco', hint: 'Leitura clara dos quilómetros' },
 ]
+// Todas as zonas obrigatórias, por ordem — serve o formulário e a vista de
+// detalhe. Construído das listas acima, para nunca ficar desactualizado.
+const ALL_ZONES = [...REQ_ZONES, ...WHEEL_ZONES, BATTERY_ZONE, ...DASH_ZONES]
+const ZONE_LABEL: Record<string, string> = Object.fromEntries(ALL_ZONES.map(z => [z.key, z.label]))
+const zoneName = (zona: string) =>
+  ZONE_LABEL[zona] || (zona?.startsWith('damage-') ? 'Dano registado' : zona)
 const REQ_TOTAL = REQ_ZONES.length + WHEEL_ZONES.length + 1 + DASH_ZONES.length   // 14 fotos obrigatórias
 
 // Sistemas verificados à entrada (estado como chegou)
@@ -412,6 +472,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   const [vin, setVin] = useState('')                                        // identidade permanente do carro
   const [isNonRunner, setIsNonRunner] = useState(false)                     // entrou sem funcionar
   const [entryPending, setEntryPending] = useState(false)                   // KM e painel ficam para depois
+  const [erroFinal, setErroFinal] = useState<{ joId: string; numero: string; msg: string } | null>(null)
   const [pendingReason, setPendingReason] = useState('')                    // porquê — escrito à mão, de propósito
   const [nonRunnerTerms, setNonRunnerTerms] = useState<any>(null)           // texto dos T&C do non-runner
   const [nonRunnerAccepted, setNonRunnerAccepted] = useState(false)
@@ -673,15 +734,17 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       termsVersion: terms?.version || '1.0',
       termsAcceptedAt: new Date().toISOString(),
     }
-    const allReq = [...REQ_ZONES, ...WHEEL_ZONES, BATTERY_ZONE, ...DASH_ZONES]   // 14 fotos obrigatórias
+    const allReq = ALL_ZONES   // as 14 obrigatórias
     // Só sobem as que ainda não estão no servidor. Um rascunho retomado já
     // tem as suas lá — reenviá-las seria pagar duas vezes a mesma factura em 3G.
     const reqPhotos = allReq.filter(z => photos[z.key])
     const damagePhotos = damages.filter(d => d.photo)
     const totalUploads = reqPhotos.length + damagePhotos.length + (idDoc ? 1 : 0)
+    let joCriada: any = null
     try {
       if (!navigator.onLine) throw new Error('OFFLINE')
       const jo = await api('/api/v1/receptions', { method: 'POST', body: JSON.stringify(payload) })
+      joCriada = jo                       // a partir daqui já existe no servidor
       let done = 0
       let totalBefore = 0, totalAfter = 0
       setProgress({ done: 0, total: totalUploads })
@@ -718,7 +781,18 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       })
       setProgress(null)
       setResult({ number: jo.number, offline: false, joId: jo.id })
-    } catch {
+    } catch (e: any) {
+      // A fila offline só serve para o que NUNCA chegou ao servidor. Se a JO
+      // já foi criada, enfileirá-la outra vez criaria uma segunda entrada do
+      // mesmo carro — e dizer "guardada offline" seria mentira: metade está lá.
+      if (joCriada) {
+        setProgress(null)
+        setErroFinal({
+          joId: joCriada.id, numero: joCriada.number,
+          msg: e?.message || 'A ligação falhou a meio do envio.',
+        })
+        return
+      }
       const offlineId = await offline.enqueueReception(payload)
       for (const z of allReq)
         if (photos[z.key]) await offline.savePhotoBlob(offlineId, z.key, photos[z.key], { isRequired: true, latitude: gps?.lat, longitude: gps?.lng })
@@ -729,6 +803,27 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       setResult({ number: 'Pendente (offline)', offline: true })
     } finally { setBusy(false) }
   }
+
+  if (erroFinal) return (
+    <main className="reception">
+      <div className="success-box">
+        <div className="success-ic" style={{ background: 'var(--danger-bg)', color: 'var(--danger)' }}>
+          <i className="ti ti-alert-triangle" aria-hidden="true"></i>
+        </div>
+        <div className="success-number">{erroFinal.numero}</div>
+        <p><strong>A entrada foi criada, mas o envio falhou a meio.</strong></p>
+        <p style={{ marginTop: 8 }}>{erroFinal.msg}</p>
+        <p style={{ marginTop: 8 }}>
+          Parte das fotos já está no servidor. Abre esta entrada na lista de recepções
+          e usa <strong>“Completar entrada”</strong> para acrescentar o que faltou.
+          Não voltes a lançar o carro — ficarias com duas entradas do mesmo.
+        </p>
+        <div className="success-actions">
+          <button className="btn-primary" style={{ justifyContent: 'center' }} onClick={onDone}>Ver recepções</button>
+        </div>
+      </div>
+    </main>
+  )
 
   if (result) return (
     <main className="reception">
@@ -1524,6 +1619,12 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
           return <>
           {visible.map(r => {
           const isDraft = r.status === 'draft'
+          // Faltam fotos obrigatórias? 14 normalmente, 11 se a entrada ficou
+          // pendente (as 3 do painel exigem ignição). Serve para qualquer
+          // razão de falta, não só a bateria.
+          const minFotos = r.entry_pending_reason ? 11 : 14
+          const fotosEmFalta = !isDraft && Number(r.req_photos ?? minFotos) < minFotos
+          const incompleta = !isDraft && !r.entry_completed_at && (!!r.entry_pending_reason || fotosEmFalta)
           return (
             <div key={r.id} className={`list-row clickable ${isDraft ? 'is-draft' : ''}`}>
               <span className="jo-num" onClick={() => onOpen(r.id)}>{r.number}</span>
@@ -1536,9 +1637,11 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
               </div>
               <div className="list-tags">
               {r.is_non_runner && <span className="badge-nr" title="Entrou sem funcionar"><i className="ti ti-engine-off" aria-hidden="true"></i> Não funciona</span>}
-              {r.entry_pending_reason && !r.entry_completed_at && (
-                <span className="badge-incomplete" title={`Falta o km e as fotos do painel — ${r.entry_pending_reason}`}>
-                  <i className="ti ti-battery-off" aria-hidden="true"></i> Entrada incompleta
+              {incompleta && (
+                <span className="badge-incomplete" title={r.entry_pending_reason
+                  ? `Falta o km e as fotos do painel — ${r.entry_pending_reason}`
+                  : `Faltam ${minFotos - Number(r.req_photos ?? 0)} fotos obrigatórias`}>
+                  <i className="ti ti-camera-off" aria-hidden="true"></i> Entrada incompleta
                 </span>
               )}
               {isDraft
@@ -1555,7 +1658,7 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
                   Continuar <i className="ti ti-arrow-right" aria-hidden="true"></i>
                 </button>
               )}
-              {!isDraft && r.entry_pending_reason && !r.entry_completed_at && onComplete && (
+              {incompleta && onComplete && (
                 <button className="btn-primary btn-sm" onClick={() => onComplete(r.id)} title="Registar o km e as fotos do painel">
                   <i className="ti ti-battery-charging" aria-hidden="true"></i> Completar entrada
                 </button>
@@ -1565,7 +1668,7 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
                   <i className="ti ti-signature" aria-hidden="true"></i> Assinar agora
                 </button>
               )}
-              {!isDraft && r.signed_at && r.status !== 'delivered' && onOpenOS && !(r.entry_pending_reason && !r.entry_completed_at) && (
+              {!isDraft && r.signed_at && r.status !== 'delivered' && onOpenOS && !incompleta && (
                 r.os_opened_at
                   ? <button className="btn-ghost btn-sm" onClick={() => onOpenOS(r.id)} title="Ver Ordem de Serviço"><i className="ti ti-clipboard-list" aria-hidden="true"></i> Ver OS</button>
                   : <button className="btn-primary btn-sm" onClick={() => onOpenOS(r.id)} title="Iniciar Ordem de Serviço"><i className="ti ti-tools" aria-hidden="true"></i> Iniciar OS</button>
@@ -1636,6 +1739,12 @@ function ReceptionDetail({ joId, onBack, onResume, isOwner, onOpenOther, onOpenO
   // Sistemas verificados à entrada — só mostra os que foram mesmo avaliados.
   const sysRaw = typeof jo.systems_check === 'string' ? JSON.parse(jo.systems_check || '{}') : (jo.systems_check || {})
   const sysEntries: [string, string][] = Object.entries(sysRaw).filter(([, v]) => !!v) as [string, string][]
+  // Fotos por zona, para se poder mostrar cada uma com o seu nome e ver
+  // quais faltam. As que não são de zona conhecida (danos, extras) vão à parte.
+  const porZona: Record<string, any> = {}
+  for (const p of (jo?.photos || [])) if (p.url) porZona[p.zone] = p
+  const emFalta = ALL_ZONES.filter(z => !porZona[z.key])
+  const outras = (jo?.photos || []).filter((p: any) => p.url && !ZONE_LABEL[p.zone])
   const checklist = asObj(jo.checklist)
   const items = Object.keys(checklist).filter(k => checklist[k])
   const fmt = (s?: string) => s ? new Date(s).toLocaleString('pt-PT') : '—'
@@ -1816,14 +1925,44 @@ function ReceptionDetail({ joId, onBack, onResume, isOwner, onOpenOther, onOpenO
 
       {jo.photos && jo.photos.length > 0 && (
         <div className="det-section">
-          <div className="det-section-title">Fotos ({jo.photos.length})</div>
-          <div className="review-photos">
-            {jo.photos.map((p: any) => p.url && (
-              <div key={p.id} className="review-photo" onClick={() => setPhoto(p.url)}>
-                <img src={p.url} alt={p.zone} />
-              </div>
-            ))}
+          <div className="det-section-title">
+            Fotos da entrada ({jo.photos.length})
+            {emFalta.length > 0 && <span className="fotos-falta">{emFalta.length} em falta</span>}
           </div>
+
+          {/* Obrigatórias, pela ordem em que se tiram, com o nome à vista.
+              Sem legenda ninguém sabe qual é a bateria no meio de 14 miniaturas
+              — nem repara se falta alguma. */}
+          <div className="foto-grid">
+            {ALL_ZONES.map(z => {
+              const p = porZona[z.key]
+              return p?.url ? (
+                <button key={z.key} className="foto-card" onClick={() => setPhoto(p.url)}>
+                  <img src={p.url} alt={z.label} />
+                  <span className="foto-nome">{z.label}</span>
+                </button>
+              ) : (
+                <div key={z.key} className="foto-card vazio">
+                  <span className="foto-icon"><i className="ti ti-camera-off" aria-hidden="true"></i></span>
+                  <span className="foto-nome">{z.label}</span>
+                </div>
+              )
+            })}
+          </div>
+
+          {outras.length > 0 && (
+            <>
+              <div className="foto-sub">Outras fotos ({outras.length})</div>
+              <div className="foto-grid">
+                {outras.map((p: any) => (
+                  <button key={p.id} className="foto-card" onClick={() => setPhoto(p.url)}>
+                    <img src={p.url} alt={zoneName(p.zone)} />
+                    <span className="foto-nome">{zoneName(p.zone)}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -1948,7 +2087,8 @@ function CompleteEntry({ joId, onBack, onDone }: { joId: string; onBack: () => v
   // Que fotos do painel já lá estão (podem ter sido tiradas noutra sessão)
   const already = new Set<string>((jo?.photos || []).map((p: any) => p.zone))
   const missing = DASH_ZONES.filter(z => !already.has(z.key) && !shots[z.key])
-  const canSave = V.km(km) && km.trim().length > 0 && missing.length === 0
+  const kmJaLa = jo?.km_entry != null            // pode já ter sido registado
+  const canSave = missing.length === 0 && (kmJaLa || (V.km(km) && km.trim().length > 0))
 
   const takePhoto = (zone: string) => { pendingZone.current = zone; fileRef.current?.click() }
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1968,7 +2108,7 @@ function CompleteEntry({ joId, onBack, onDone }: { joId: string; onBack: () => v
         await uploadPhoto(joId, zone, blob, { isRequired: true })
       }
       await api(`/api/v1/receptions/${joId}/complete-entry`, {
-        method: 'POST', body: JSON.stringify({ kmEntry: Number(km) }),
+        method: 'POST', body: JSON.stringify({ kmEntry: km ? Number(km) : undefined }),
       })
       onDone()
     } catch (e: any) { setErr(e?.message || 'Não foi possível completar.') }
@@ -1986,9 +2126,11 @@ function CompleteEntry({ joId, onBack, onDone }: { joId: string; onBack: () => v
       </div>
 
       <div className="pending-box">
-        <div className="pending-head"><i className="ti ti-battery-off" aria-hidden="true"></i> Ficou por registar à entrada</div>
-        <p>Motivo: <strong>{jo.entry_pending_reason}</strong></p>
-        <p>Falta o km e as fotos do painel. Assim que estiverem, a OS pode arrancar.</p>
+        <div className="pending-head"><i className="ti ti-camera-off" aria-hidden="true"></i> Ficou por registar à entrada</div>
+        {jo.entry_pending_reason
+          ? <p>Motivo: <strong>{jo.entry_pending_reason}</strong></p>
+          : <p>Esta entrada foi selada sem todas as fotos obrigatórias.</p>}
+        <p>Falta{missing.length === 1 ? '' : 'm'} {missing.length} foto{missing.length === 1 ? '' : 's'} do painel{kmJaLa ? '' : ' e o km'}. Assim que estiver{missing.length === 1 ? '' : 'em'}, a OS pode arrancar.</p>
       </div>
 
       <div className="sign-summary">
@@ -1996,9 +2138,17 @@ function CompleteEntry({ joId, onBack, onDone }: { joId: string; onBack: () => v
         <div className="hint">Entrou em {jo.received_at ? new Date(jo.received_at).toLocaleDateString('pt-PT') : '—'}</div>
       </div>
 
-      <label className="fl" style={{ marginTop: 16 }}>Km actuais <span className="req">*</span></label>
-      <input type="number" inputMode="numeric" value={km} onChange={e => setKm(e.target.value)} placeholder="ex: 87340" />
-      {km.length > 0 && !V.km(km) && <div className="field-warn">Km inválidos.</div>}
+      {kmJaLa ? (
+        <div className="sign-summary" style={{ marginTop: 16 }}>
+          <div>Km já registados: <strong>{MZmt(jo.km_entry)} km</strong></div>
+        </div>
+      ) : (
+        <>
+          <label className="fl" style={{ marginTop: 16 }}>Km actuais <span className="req">*</span></label>
+          <input type="number" inputMode="numeric" value={km} onChange={e => setKm(e.target.value)} placeholder="ex: 87340" />
+          {km.length > 0 && !V.km(km) && <div className="field-warn">Km inválidos.</div>}
+        </>
+      )}
 
       <label className="fl" style={{ marginTop: 16 }}>Painel e conta-km <span className="req">*</span></label>
       <div className="dash-grid">

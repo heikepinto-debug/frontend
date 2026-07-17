@@ -17,6 +17,7 @@ export async function api(path: string, opts: RequestInit = {}): Promise<any> {
         // recusam com "Body cannot be empty when content-type is application/json".
         ...(opts.body != null ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        'X-App-Version': __APP_VERSION__,
         ...(opts.headers || {}),
       },
     })

@@ -3,7 +3,13 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
 
+// Carimbo de versão: sem isto não há forma de saber que código alguém está
+// a correr. Custou-nos horas de diagnóstico a descobrir um cliente preso
+// numa versão antiga — com o carimbo, ver-se-ia num segundo.
+const BUILD = new Date().toISOString().slice(0, 16).replace('T', ' ')
+
 export default defineConfig({
+  define: { __APP_VERSION__: JSON.stringify(BUILD) },
   plugins: [
     react(),
     VitePWA({
