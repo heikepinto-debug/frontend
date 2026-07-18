@@ -67,6 +67,7 @@ export const offline = {
     await db.put('queue', {
       offlineId, entityType: 'reception', payload,
       createdAt: new Date().toISOString(),
+      attempts: 0, lastError: null,       // para não tentar em ciclo eterno em silêncio
     })
     return offlineId
   },
@@ -79,6 +80,33 @@ export const offline = {
   async pendingCount(): Promise<number> {
     const db = await dbp
     return db.count('queue')
+  },
+
+  // O que está preso na fila, para se poder ver e agir — em vez de um
+  // contador cego que só diz "há qualquer coisa por sincronizar".
+  async listQueue(): Promise<any[]> {
+    const db = await dbp
+    const items = await db.getAll('queue')
+    const fotos = await db.getAll('photos')
+    return items.map((i: any) => ({
+      offlineId: i.offlineId,
+      cliente: (i.payload?.customer?.fullName) || (i.payload?.customer?.id ? 'Cliente existente' : '—'),
+      matricula: i.payload?.vehicle?.plate || '—',
+      createdAt: i.createdAt,
+      attempts: i.attempts || 0,
+      lastError: i.lastError || null,
+      fotos: fotos.filter((p: any) => p.offlineId === i.offlineId).length,
+    }))
+  },
+
+  // Descartar uma entrada presa que não há forma de enviar (payload velho
+  // e irreparável). Decisão consciente do utilizador, com aviso.
+  async discardQueued(offlineId: string) {
+    const db = await dbp
+    const fotos = await db.getAll('photos')
+    for (const p of fotos.filter((x: any) => x.offlineId === offlineId))
+      await db.delete('photos', p.key)
+    await db.delete('queue', offlineId)
   },
 
   async syncAll(): Promise<{ ok: number; failed: number }> {
@@ -109,7 +137,18 @@ export const offline = {
         }
         await db.delete('queue', r.offlineId)
         ok++
-      } else failed++
+      } else {
+        // Não apaga (a JO não foi criada), mas regista o erro e conta a
+        // tentativa — para deixar de tentar em silêncio e poder mostrar-se
+        // ao utilizador o que está preso e porquê.
+        const item = await db.get('queue', r.offlineId)
+        if (item) {
+          item.attempts = (item.attempts || 0) + 1
+          item.lastError = r.error || 'Erro desconhecido'
+          await db.put('queue', item)
+        }
+        failed++
+      }
     }
     return { ok, failed }
   },

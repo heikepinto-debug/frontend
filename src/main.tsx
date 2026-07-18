@@ -98,7 +98,7 @@ function Shell() {
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
   const [temUpdate, setTemUpdate] = useState(false)   // há versão nova à espera
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
@@ -217,7 +217,7 @@ function Shell() {
             <div className="sidebar-user-info">
               <div className="sidebar-user-name">{user?.name}</div>
               {!online && <span className="offline-pill">Offline{pending > 0 ? ` · ${pending}` : ''}</span>}
-              {online && pending > 0 && <span className="sync-pill">A sincronizar {pending}…</span>}
+              {online && pending > 0 && <button className="sync-pill" onClick={() => setView('queue')} title="Ver o que está por sincronizar">A sincronizar {pending}…</button>}
             </div>
             <button className="btn-ghost btn-sm" onClick={logout} title="Sair"><i className="ti ti-logout" aria-hidden="true"></i></button>
           </div>
@@ -322,6 +322,7 @@ function Shell() {
       {view === 'authorizations' && <Authorizations onBack={() => setView('home')} onOpen={(id: string) => { setOsId(id); setOsReturnTo('authorizations'); setView('os') }} />}
       {view === 'sign' && signId && <CompleteSignature joId={signId} onBack={() => setView('list')} onDone={() => { setSignId(undefined); setView('list') }} />}
       {view === 'complete' && completeId && <CompleteEntry joId={completeId} onBack={() => setView('list')} onDone={() => { setCompleteId(undefined); setView('list') }} />}
+      {view === 'queue' && <SyncQueue onBack={() => setView('home')} />}
       {view === 'password' && <ChangePassword onBack={() => setView('home')} />}
       {view === 'errorlogs' && <ErrorLogs onBack={() => setView('home')} />}
       {view === 'tasks' && <Tasks onBack={() => setView('home')} isOwner={isOwner} myId={user?.id || ''} />}
@@ -2180,6 +2181,81 @@ function CompleteEntry({ joId, onBack, onDone }: { joId: string; onBack: () => v
 // ── MUDAR A MINHA SENHA ──────────────────────────────────────
 // Tira à Direcção o trabalho de repor senhas por SQL. Essencial
 // antes de qualquer oficina externa entrar.
+// ── FILA DE SINCRONIZAÇÃO (o que está preso, e porquê) ───────
+// Antes, uma entrada presa na fila era invisível: um contador dizia
+// "a sincronizar 1…" para sempre, sem dizer o quê nem porquê. Isto
+// abre a caixa — mostra o que falta subir, o erro, e deixa forçar
+// o envio ou descartar o que é irrecuperável.
+function SyncQueue({ onBack }: { onBack: () => void }) {
+  const [items, setItems] = useState<any[]>([])
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const load = () => offline.listQueue().then(setItems)
+  useEffect(() => { load() }, [])
+
+  const forcar = async () => {
+    setBusy(true); setMsg(null)
+    try {
+      const r = await offline.syncAll()
+      setMsg(r.ok > 0 ? `${r.ok} enviada(s).` : r.failed > 0 ? 'Continua a falhar — ver o erro abaixo.' : 'Nada para enviar.')
+      await load()
+    } catch (e: any) { setMsg(e?.message || 'Não foi possível sincronizar.') }
+    finally { setBusy(false) }
+  }
+
+  const descartar = async (offlineId: string) => {
+    if (!confirm('Descartar esta entrada presa? As fotos guardadas por enviar também são apagadas. Não há forma de recuperar depois.')) return
+    await offline.discardQueued(offlineId)
+    await load()
+  }
+
+  return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Por sincronizar</h2><span />
+      </div>
+
+      {items.length === 0 ? (
+        <div className="bi-known" style={{ marginTop: 20 }}>
+          <i className="ti ti-circle-check" aria-hidden="true"></i> Está tudo sincronizado. Nada preso.
+        </div>
+      ) : (
+        <>
+          <p className="hint" style={{ marginBottom: 14 }}>
+            Estas entradas ainda não subiram ao servidor. Estão guardadas neste aparelho.
+            Tenta enviar; se uma falhar sempre por erro irrecuperável, podes descartá-la.
+          </p>
+          {msg && <div className="banner ok" style={{ marginBottom: 14 }}><i className="ti ti-info-circle" aria-hidden="true"></i><span>{msg}</span></div>}
+          <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginBottom: 16 }} disabled={busy} onClick={forcar}>
+            {busy ? 'A enviar…' : <>Tentar enviar tudo agora <i className="ti ti-cloud-upload" aria-hidden="true"></i></>}
+          </button>
+
+          <div className="queue-list">
+            {items.map(it => (
+              <div key={it.offlineId} className="queue-card">
+                <div className="queue-main">
+                  <div className="queue-title">{it.cliente} · {it.matricula}</div>
+                  <div className="queue-sub">
+                    {it.createdAt ? new Date(it.createdAt).toLocaleString('pt-PT') : '—'}
+                    {it.fotos > 0 ? ` · ${it.fotos} foto(s)` : ''}
+                    {it.attempts > 0 ? ` · ${it.attempts} tentativa(s)` : ''}
+                  </div>
+                  {it.lastError && <div className="queue-err"><i className="ti ti-alert-triangle" aria-hidden="true"></i> {it.lastError}</div>}
+                </div>
+                <button className="btn-ghost btn-sm danger" onClick={() => descartar(it.offlineId)} title="Descartar">
+                  <i className="ti ti-trash" aria-hidden="true"></i>
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </main>
+  )
+}
+
+// ── FILA DE SINCRONIZAÇÃO acaba aqui ─────────────────────────
 function ChangePassword({ onBack }: { onBack: () => void }) {
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
