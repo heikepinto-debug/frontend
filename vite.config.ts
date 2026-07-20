@@ -7,7 +7,7 @@ import path from 'path'
 // a correr. Custou-nos horas de diagnóstico a descobrir um cliente preso
 // numa versão antiga — com o carimbo, ver-se-ia num segundo.
 const BUILD = new Date().toISOString().slice(0, 16).replace('T', ' ')
-const PACOTE = 'v35'   // número do pacote — actualizar a cada entrega
+const PACOTE = 'v36'   // número do pacote — actualizar a cada entrega
 
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(BUILD), __APP_PACKAGE__: JSON.stringify(PACOTE) },

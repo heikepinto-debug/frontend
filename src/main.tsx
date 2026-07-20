@@ -98,7 +98,7 @@ function Shell() {
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
   const [temUpdate, setTemUpdate] = useState(false)   // há versão nova à espera
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'reception-quick'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
@@ -283,6 +283,12 @@ function Shell() {
                 <span>Nova recepção</span>
               </button>
             )}
+            {canDo('reception:create') && (
+              <button className="quick-card" onClick={() => { setResumeDraftId(undefined); setView('reception-quick') }}>
+                <i className="ti ti-bolt" aria-hidden="true"></i>
+                <span>Entrada rápida</span>
+              </button>
+            )}
             {canDo('reception:read') && (
               <button className="quick-card" onClick={() => setView('list')}>
                 <i className="ti ti-list-details" aria-hidden="true"></i>
@@ -311,6 +317,7 @@ function Shell() {
         </main>
       )}
       {view === 'reception' && <Reception key={resumeDraftId || 'new'} resumeDraftId={resumeDraftId} onDone={() => { setResumeDraftId(undefined); setView('list') }} onBack={() => { setResumeDraftId(undefined); setView('home') }} />}
+      {view === 'reception-quick' && <Reception key="quick" quick onDone={() => { setView('list') }} onBack={() => setView('home')} />}
       {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
         onSign={(id: string) => { setSignId(id); setView('sign') }}
         onComplete={(id: string) => { setCompleteId(id); setView('complete') }} />}
@@ -450,9 +457,15 @@ const V = {
 }
 
 
-function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBack: () => void; resumeDraftId?: string }) {
+function Reception({ onDone, onBack, resumeDraftId, quick }: { onDone: () => void; onBack: () => void; resumeDraftId?: string; quick?: boolean }) {
   const tenant = useSession(s => s.tenant)
   const [step, setStep] = useState(0)
+  // Entrada rápida: só o essencial — cliente, viatura, serviços, km, assinatura.
+  // Salta o estado detalhado, os danos e as 14 fotos. Serve PPI, diagnóstico e
+  // serviços rápidos, onde a ficha completa seria redundante.
+  const STEPS = quick ? [0, 1, 2, 6] : [0, 1, 2, 3, 4, 5, 6]
+  const goNext = () => { const i = STEPS.indexOf(step); if (i < STEPS.length - 1) setStep(STEPS[i + 1]) }
+  const goBack = () => { const i = STEPS.indexOf(step); if (i > 0) setStep(STEPS[i - 1]) }
   const [units, setUnits] = useState<any[]>([])
   const [terms, setTerms] = useState<any>(null)
   const [gps, setGps] = useState<{ lat: number; lng: number } | null>(null)
@@ -531,7 +544,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
     api('/api/v1/terms/non_runner').then(setNonRunnerTerms).catch(() => {})
     // Pop-up do dever de diagnóstico (se ligado) — só numa entrada nova, não ao retomar rascunho
     if (!resumeDraftId) {
-      api('/api/v1/reception-config').then(r => { if (r.diagnosisNoticeOn) setShowDiagNotice(true) }).catch(() => {})
+      if (!quick) api("/api/v1/reception-config").then(r => { if (r.diagnosisNoticeOn) setShowDiagNotice(true) }).catch(() => {})
     }
     navigator.geolocation?.getCurrentPosition(
       p => setGps({ lat: p.coords.latitude, lng: p.coords.longitude }),
@@ -598,8 +611,10 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       wantsOldParts: wantsOldParts ?? undefined,
       isNonRunner,
       clientPresence: presence || undefined,
+      entryType: quick ? 'quick' : 'full',
       entryPendingReason: entryPending ? pendingReason.trim() : undefined,
-      intentions, services: chosenServices.map(({ serviceTypeId, typeName, notes }) => ({ serviceTypeId, typeName, notes })), serviceDescription: svcDesc || undefined,
+      intentions: intentions.length ? intentions : chosenServices.map(x => x.typeName),
+      services: chosenServices.map(({ serviceTypeId, typeName, notes }) => ({ serviceTypeId, typeName, notes })), serviceDescription: svcDesc || undefined,
       bookingDate: bookingDate || undefined,
     }
     try {
@@ -724,7 +739,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
     switch (step) {
       case 0: return !!existingCust || (newCust && custName.trim().length >= 2 && V.phone(custPhone) && V.email(custEmail))
       case 1: return !!existingVeh || (V.plate(plate) && V.year(vyear))  // ano opcional (V.year aceita vazio)
-      case 2: return chosenServices.length >= 1 && !!presence && intentions.length >= 1
+      case 2: return chosenServices.length >= 1 && !!presence && (quick ? V.km(km) : intentions.length >= 1)
       case 3: return valuables.trim().length > 0 && (entryPending ? pendingReason.trim().length >= 3 : V.km(km)) && wantsOldParts !== null
       case 4: return true                       // danos são opcionais
       case 5: {
@@ -770,8 +785,10 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       wantsOldParts: wantsOldParts ?? undefined,
       isNonRunner,
       clientPresence: presence || undefined,
+      entryType: quick ? 'quick' : 'full',
       entryPendingReason: entryPending ? pendingReason.trim() : undefined,
-      intentions, services: chosenServices.map(({ serviceTypeId, typeName, notes }) => ({ serviceTypeId, typeName, notes })), serviceDescription: svcDesc || undefined,
+      intentions: intentions.length ? intentions : chosenServices.map(x => x.typeName),
+      services: chosenServices.map(({ serviceTypeId, typeName, notes }) => ({ serviceTypeId, typeName, notes })), serviceDescription: svcDesc || undefined,
       bookingDate: bookingDate || undefined,
       termsVersion: terms?.version || '1.0',
       termsAcceptedAt: new Date().toISOString(),
@@ -1001,7 +1018,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
             </>
           )}
           <div className="rec-nav"><span />
-            <button className="btn-primary" disabled={!canNext()} onClick={() => setStep(1)}>Próximo <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
+            <button className="btn-primary" disabled={!canNext()} onClick={goNext}>Próximo <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
           </div>
         </section>
       )}
@@ -1061,8 +1078,8 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
           )}
 
           <div className="rec-nav">
-            <button className="btn-ghost" onClick={() => setStep(0)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
-            <button className="btn-primary" disabled={!canNext()} onClick={() => setStep(2)}>Próximo <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
+            <button className="btn-ghost" onClick={goBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
+            <button className="btn-primary" disabled={!canNext()} onClick={goNext}>Próximo <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
           </div>
         </section>
       )}
@@ -1109,6 +1126,14 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
             </>
           )}
 
+          {quick && (
+            <>
+              <label className="fl" style={{ marginTop: 18 }}>Quilómetros à entrada <span className="req">*</span></label>
+              <input type="number" inputMode="numeric" value={km} onChange={e => setKm(e.target.value)} placeholder="ex: 87340" />
+              {km.length > 0 && !V.km(km) && <div className="field-warn">Km inválidos.</div>}
+            </>
+          )}
+
           <label className="fl" style={{ marginTop: 18 }}>O que o cliente relatou <span className="req">*</span></label>
           <div className="intent-input-row">
             <input value={intentInput}
@@ -1142,8 +1167,8 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
           <input type="datetime-local" value={bookingDate} onChange={e => setBookingDate(e.target.value)} />
           <p className="hint" style={{ marginTop: 6 }}>Quando o cliente marcou ou vai trazer o carro. Serve para lembretes futuros.</p>
           <div className="rec-nav">
-            <button className="btn-ghost" onClick={() => setStep(1)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
-            <button className="btn-primary" disabled={!canNext()} onClick={() => setStep(3)}>Próximo <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
+            <button className="btn-ghost" onClick={goBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
+            <button className="btn-primary" disabled={!canNext()} onClick={goNext}>Próximo <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
           </div>
         </section>
       )}
@@ -1216,8 +1241,8 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
           </div>
 
           <div className="rec-nav">
-            <button className="btn-ghost" onClick={() => setStep(2)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
-            <button className="btn-primary" disabled={!canNext()} onClick={() => setStep(4)}>Próximo <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
+            <button className="btn-ghost" onClick={goBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
+            <button className="btn-primary" disabled={!canNext()} onClick={goNext}>Próximo <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
           </div>
         </section>
       )}
@@ -1265,10 +1290,10 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
             </div>
           )}
           <div className="rec-nav">
-            <button className="btn-ghost" onClick={() => setStep(3)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
+            <button className="btn-ghost" onClick={goBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <span className="dmg-count">{damages.length === 0 ? 'Sem danos' : `${damages.length} dano${damages.length === 1 ? '' : 's'}`}</span>
-              <button className="btn-primary" onClick={() => setStep(5)}>{damages.length === 0 ? 'Sem danos, continuar' : 'Continuar'} <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
+              <button className="btn-primary" onClick={goNext}>{damages.length === 0 ? 'Sem danos, continuar' : 'Continuar'} <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
             </div>
           </div>
         </section>
@@ -1334,8 +1359,8 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
             {totalReq} de {REQ_TOTAL} fotos {totalReq >= REQ_TOTAL ? '— completo' : `— faltam ${REQ_TOTAL - totalReq}`}
           </div>
           <div className="rec-nav">
-            <button className="btn-ghost" onClick={() => setStep(4)}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
-            <button className="btn-primary" disabled={!canNext()} onClick={() => setStep(6)}>Próximo <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
+            <button className="btn-ghost" onClick={goBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior</button>
+            <button className="btn-primary" disabled={!canNext()} onClick={goNext}>Próximo <i className="ti ti-arrow-right" aria-hidden="true"></i></button>
           </div>
         </section>
       )}
@@ -1353,7 +1378,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
           <button className="btn-primary handoff-btn" onClick={() => setHandedOff(true)}>
             Continuar <i className="ti ti-arrow-right" aria-hidden="true"></i>
           </button>
-          <button className="btn-ghost" style={{ marginTop: 10 }} onClick={() => setStep(5)}>
+          <button className="btn-ghost" style={{ marginTop: 10 }} onClick={goBack}>
             <i className="ti ti-arrow-left" aria-hidden="true"></i> Voltar
           </button>
         </section>
@@ -1710,8 +1735,10 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
           // pendente (as 3 do painel exigem ignição). Serve para qualquer
           // razão de falta, não só a bateria.
           const minFotos = r.entry_pending_reason ? 11 : 14
-          const fotosEmFalta = !isDraft && Number(r.req_photos ?? minFotos) < minFotos
-          const incompleta = !isDraft && !r.entry_completed_at && (!!r.entry_pending_reason || fotosEmFalta)
+          // Entrada rápida não tem fotos por desenho — nunca é "incompleta" por isso.
+          const isQuick = r.entry_type === 'quick'
+          const fotosEmFalta = !isDraft && !isQuick && Number(r.req_photos ?? minFotos) < minFotos
+          const incompleta = !isDraft && !isQuick && !r.entry_completed_at && (!!r.entry_pending_reason || fotosEmFalta)
           return (
             <div key={r.id} className={`list-row clickable ${isDraft ? 'is-draft' : ''}`}>
               <span className="jo-num" onClick={() => onOpen(r.id)}>{r.number}</span>
