@@ -766,3 +766,32 @@ textarea { resize: vertical; line-height: 1.55; }
 .seg { flex: 1; padding: 11px; border: 1.5px solid var(--line); border-radius: var(--radius-sm); background: var(--s1);
   font-size: 13px; font-weight: 500; color: var(--ink-2); cursor: pointer; }
 .seg.on { border-color: var(--brand); background: var(--brand-bg); color: var(--brand-dark); }
+
+/* ── Circuito PPI ─────────────────────────────────────────── */
+.ppi-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.ppi-veh { font-size: 15px; font-weight: 700; color: var(--ink); }
+.ppi-cust { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+.ppi-level { display: flex; gap: 4px; }
+.ppi-lvl { padding: 6px 11px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--s1); font-size: 12px; font-weight: 600; color: var(--ink-2); cursor: pointer; }
+.ppi-lvl.on { border-color: var(--brand); background: var(--brand-bg); color: var(--brand-dark); }
+.ppi-progress { height: 6px; background: var(--s3); border-radius: 4px; overflow: hidden; margin-bottom: 6px; }
+.ppi-progress-bar { height: 100%; background: var(--brand); transition: width .3s; }
+.ppi-section { border: 1px solid var(--line); border-radius: var(--radius-sm); margin-bottom: 10px; overflow: hidden; }
+.ppi-sec-head { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 13px 15px; background: var(--s1); border: none; cursor: pointer; font-size: 15px; font-weight: 600; color: var(--ink); }
+.ppi-sec-body { padding: 6px 15px 14px; }
+.ppi-point { padding: 12px 0; border-top: 1px solid var(--line); }
+.ppi-point:first-child { border-top: none; }
+.ppi-point-name { font-size: 14px; font-weight: 600; color: var(--ink); margin-bottom: 8px; }
+.ppi-field { margin-bottom: 12px; }
+.ppi-field-label { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: 5px; }
+.ppi-saving { margin-left: 8px; font-size: 11px; color: var(--brand); font-style: italic; }
+.ppi-states { display: flex; gap: 6px; flex-wrap: wrap; }
+.ppi-state { padding: 7px 13px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--s1); font-size: 13px; font-weight: 600; color: var(--ink-2); cursor: pointer; }
+.ppi-state.bom.on { border-color: #16A34A; background: #DCFCE7; color: #15803D; }
+.ppi-state.acc.on { border-color: #D97706; background: #FEF3C7; color: #B45309; }
+.ppi-state.mau.on { border-color: #DC2626; background: var(--danger-bg); color: var(--danger); }
+.ppi-state.na.on { border-color: var(--ink-3); background: var(--s3); color: var(--ink-2); }
+.ppi-field input, .ppi-field textarea { width: 100%; }
+.ppi-attach { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ppi-attach-view { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--brand); text-decoration: none; }
+.ppi-attach label.btn-ghost { cursor: pointer; }

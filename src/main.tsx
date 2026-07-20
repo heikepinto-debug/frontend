@@ -98,10 +98,11 @@ function Shell() {
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
   const [temUpdate, setTemUpdate] = useState(false)   // há versão nova à espera
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'reception-quick'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'reception-quick' | 'ppi'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
+  const [ppiJoId, setPpiJoId] = useState<string | null>(null)
   const [osReturnTo, setOsReturnTo] = useState<'list' | 'authorizations' | 'detail'>('list')
   const [signId, setSignId] = useState<string | undefined>(undefined)
   const [completeId, setCompleteId] = useState<string | undefined>(undefined)
@@ -318,7 +319,9 @@ function Shell() {
       )}
       {view === 'reception' && <Reception key={resumeDraftId || 'new'} resumeDraftId={resumeDraftId} onDone={() => { setResumeDraftId(undefined); setView('list') }} onBack={() => { setResumeDraftId(undefined); setView('home') }} />}
       {view === 'reception-quick' && <Reception key="quick" quick onDone={() => { setView('list') }} onBack={() => setView('home')} />}
+      {view === 'ppi' && ppiJoId && <PPICircuit joId={ppiJoId} onBack={() => setView('list')} />}
       {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
+        onOpenPPI={(id: string) => { setPpiJoId(id); setView('ppi') }}
         onSign={(id: string) => { setSignId(id); setView('sign') }}
         onComplete={(id: string) => { setCompleteId(id); setView('complete') }} />}
       {view === 'detail' && detailId && <ReceptionDetail joId={detailId} onBack={() => setView('list')}
@@ -1636,7 +1639,7 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: 'Cancelado',
 }
 
-function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, onComplete }: { onBack: () => void; onResume: (id: string) => void; onOpen: (id: string) => void; isOwner: boolean; onOpenOS?: (id: string) => void; onSign?: (id: string) => void; onComplete?: (id: string) => void }) {
+function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, onComplete, onOpenPPI }: { onBack: () => void; onResume: (id: string) => void; onOpen: (id: string) => void; isOwner: boolean; onOpenOS?: (id: string) => void; onSign?: (id: string) => void; onComplete?: (id: string) => void; onOpenPPI?: (id: string) => void }) {
   const canDelete = useSession(s => s.can('jobdelete:any'))
   const canStatus = useSession(s => s.can('jobdelete:any'))   // mudar estado: só dono, nesta fase
   const [rows, setRows] = useState<any[]>([])
@@ -1782,7 +1785,10 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
                   <i className="ti ti-signature" aria-hidden="true"></i> Assinar agora
                 </button>
               )}
-              {!isDraft && r.signed_at && r.status !== 'delivered' && onOpenOS && !incompleta && (
+              {!isDraft && r.signed_at && r.has_ppi && onOpenPPI && (
+                <button className="btn-primary btn-sm" onClick={() => onOpenPPI(r.id)} title="Abrir inspeção PPI"><i className="ti ti-clipboard-search" aria-hidden="true"></i> {r.ppi_id ? 'Continuar PPI' : 'Abrir PPI'}</button>
+              )}
+              {!isDraft && r.signed_at && r.status !== 'delivered' && onOpenOS && !incompleta && !r.has_ppi && (
                 r.os_opened_at
                   ? <button className="btn-ghost btn-sm" onClick={() => onOpenOS(r.id)} title="Ver Ordem de Serviço"><i className="ti ti-clipboard-list" aria-hidden="true"></i> Ver OS</button>
                   : <button className="btn-primary btn-sm" onClick={() => onOpenOS(r.id)} title="Iniciar Ordem de Serviço"><i className="ti ti-tools" aria-hidden="true"></i> Iniciar OS</button>
@@ -2407,6 +2413,171 @@ function ServiceTypes({ onBack }: { onBack: () => void }) {
 }
 
 // ── GESTÃO DE TIPOS DE SERVIÇO acaba aqui ────────────────────
+// ── CIRCUITO PPI — inspeção com autosave (nada se perde) ─────
+// Cada campo guarda-se assim que perde o foco ou muda. Se o
+// telemóvel morre a meio, o que já foi metido está no servidor.
+function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
+  const [insp, setInsp] = useState<any>(null)
+  const [tree, setTree] = useState<any[]>([])
+  const [answers, setAnswers] = useState<Record<string, any>>({})
+  const [saving, setSaving] = useState<Record<string, boolean>>({})
+  const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
+  const [openSec, setOpenSec] = useState<string | null>(null)
+
+  useEffect(() => {
+    api('/api/v1/ppi/start', { method: 'POST', body: JSON.stringify({ jobOrderId: joId, level: 'standard' }) })
+      .then(async (i) => {
+        setInsp(i)
+        const [tpl, full] = await Promise.all([
+          api(`/api/v1/ppi/template?level=${i.level}`),
+          api(`/api/v1/ppi/${i.id}`),
+        ])
+        setTree(tpl.sections || [])
+        if (tpl.sections?.[0]) setOpenSec(tpl.sections[0].id)
+        const map: Record<string, any> = {}
+        for (const a of (full.answers || [])) if (a.field_id) map[a.field_id] = {
+          state: a.value_state, number: a.value_number, text: a.value_text, url: a.value_url,
+        }
+        setAnswers(map)
+      })
+      .catch(e => setMsg({ kind: 'err', text: e?.message || 'Nao foi possivel abrir a inspecao.' }))
+  }, [joId])
+
+  const saveField = async (fieldId: string, pointId: string, patch: any) => {
+    setAnswers(a => ({ ...a, [fieldId]: { ...a[fieldId], ...patch } }))
+    setSaving(s => ({ ...s, [fieldId]: true }))
+    try {
+      const cur = { ...(answers[fieldId] || {}), ...patch }
+      await api(`/api/v1/ppi/${insp.id}/answer`, { method: 'PUT', body: JSON.stringify({
+        fieldId, pointId,
+        valueState: cur.state ?? null,
+        valueNumber: cur.number != null && cur.number !== '' ? Number(cur.number) : null,
+        valueText: cur.text ?? null,
+      }) })
+    } catch { setMsg({ kind: 'err', text: 'Uma resposta nao guardou. Verifica a ligacao.' }) }
+    finally { setSaving(s => ({ ...s, [fieldId]: false })) }
+  }
+
+  const attach = async (fieldId: string, pointId: string, file: File) => {
+    setSaving(s => ({ ...s, [fieldId]: true }))
+    try {
+      const pre = await api(`/api/v1/ppi/${insp.id}/attach/presign`, { method: 'POST',
+        body: JSON.stringify({ fieldId, contentType: file.type || 'application/octet-stream' }) })
+      await fetch(pre.uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file })
+      await api(`/api/v1/ppi/${insp.id}/answer`, { method: 'PUT',
+        body: JSON.stringify({ fieldId, pointId, valuePath: pre.path }) })
+      const full = await api(`/api/v1/ppi/${insp.id}`)
+      const a = (full.answers || []).find((x: any) => x.field_id === fieldId)
+      setAnswers(prev => ({ ...prev, [fieldId]: { ...prev[fieldId], url: a?.value_url } }))
+    } catch { setMsg({ kind: 'err', text: 'O anexo nao subiu.' }) }
+    finally { setSaving(s => ({ ...s, [fieldId]: false })) }
+  }
+
+  const STATES = [
+    { v: 'bom', label: 'Bom', cls: 'bom' }, { v: 'aceitavel', label: 'Aceitavel', cls: 'acc' },
+    { v: 'mau', label: 'Mau', cls: 'mau' }, { v: 'na', label: 'N.A.', cls: 'na' },
+  ]
+
+  if (!insp) return (
+    <main className="reception"><div className="rec-top"><button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Voltar</button><h2 style={{ margin: 0, fontSize: 18 }}>PPI</h2><span /></div>
+      {msg ? <Banner msg={msg} onClose={() => setMsg(null)} /> : <p className="hint" style={{ marginTop: 20 }}>A abrir inspecao...</p>}</main>
+  )
+
+  const done = tree.reduce((n, s) => n + s.points.reduce((m: number, p: any) =>
+    m + p.fields.filter((f: any) => { const a = answers[f.id]; return a && (a.state || a.number != null || a.text || a.url) }).length, 0), 0)
+  const total = tree.reduce((n, s) => n + s.points.reduce((m: number, p: any) => m + p.fields.length, 0), 0)
+
+  return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 12 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Voltar</button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Inspecao PPI</h2><span />
+      </div>
+      {msg && <Banner msg={msg} onClose={() => setMsg(null)} />}
+
+      <div className="ppi-head">
+        <div>
+          <div className="ppi-veh">{insp.plate} - {insp.brand} {insp.model}</div>
+          <div className="ppi-cust">{insp.customer_name} - {insp.jo_number}</div>
+        </div>
+        <div className="ppi-level">
+          {['basic', 'standard', 'premium'].map(l => (
+            <button key={l} className={`ppi-lvl ${insp.level === l ? 'on' : ''}`}
+              onClick={async () => {
+                await api(`/api/v1/ppi/${insp.id}/level`, { method: 'PATCH', body: JSON.stringify({ level: l }) })
+                const tpl = await api(`/api/v1/ppi/template?level=${l}`)
+                setTree(tpl.sections || []); setInsp({ ...insp, level: l })
+              }}>
+              {l === 'basic' ? 'Basico' : l === 'standard' ? 'Standard' : 'Premium'}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="ppi-progress"><div className="ppi-progress-bar" style={{ width: total ? `${Math.round(done / total * 100)}%` : '0%' }} /></div>
+      <p className="hint" style={{ marginBottom: 14 }}>{done} de {total} campos preenchidos. Guarda-se sozinho a medida que preenches.</p>
+
+      {tree.map(sec => (
+        <div key={sec.id} className="ppi-section">
+          <button className="ppi-sec-head" onClick={() => setOpenSec(openSec === sec.id ? null : sec.id)}>
+            <span>{sec.name}</span>
+            <i className={`ti ti-chevron-${openSec === sec.id ? 'up' : 'down'}`} aria-hidden="true"></i>
+          </button>
+          {openSec === sec.id && (
+            <div className="ppi-sec-body">
+              {sec.points.map((pt: any) => (
+                <div key={pt.id} className="ppi-point">
+                  <div className="ppi-point-name">{pt.name}</div>
+                  {pt.fields.map((f: any) => {
+                    const a = answers[f.id] || {}
+                    const busy = saving[f.id]
+                    return (
+                      <div key={f.id} className="ppi-field">
+                        <label className="ppi-field-label">{f.label}{f.unit ? ` (${f.unit})` : ''}{busy && <span className="ppi-saving">a guardar...</span>}</label>
+                        {f.field_type === 'state' && (
+                          <div className="ppi-states">
+                            {STATES.map(st => (
+                              <button key={st.v} className={`ppi-state ${st.cls} ${a.state === st.v ? 'on' : ''}`}
+                                onClick={() => saveField(f.id, pt.id, { state: st.v })}>{st.label}</button>
+                            ))}
+                          </div>
+                        )}
+                        {f.field_type === 'number' && (
+                          <input type="number" inputMode="decimal" defaultValue={a.number ?? ''} placeholder={f.unit || 'valor'}
+                            onBlur={e => saveField(f.id, pt.id, { number: e.target.value })} />
+                        )}
+                        {f.field_type === 'text' && (
+                          <textarea rows={2} defaultValue={a.text ?? ''} placeholder="nota..."
+                            onBlur={e => saveField(f.id, pt.id, { text: e.target.value })} />
+                        )}
+                        {(f.field_type === 'photo' || f.field_type === 'file') && (
+                          <div className="ppi-attach">
+                            {a.url && <a href={a.url} target="_blank" rel="noreferrer" className="ppi-attach-view"><i className="ti ti-paperclip" aria-hidden="true"></i> Ver anexo</a>}
+                            <label className="btn-ghost btn-sm">
+                              <i className={`ti ${f.field_type === 'photo' ? 'ti-camera' : 'ti-file-upload'}`} aria-hidden="true"></i> {a.url ? 'Substituir' : (f.field_type === 'photo' ? 'Foto' : 'Ficheiro')}
+                              <input type="file" accept={f.field_type === 'photo' ? 'image/*' : 'application/pdf,image/*'} style={{ display: 'none' }}
+                                onChange={e => { const file = e.target.files?.[0]; if (file) attach(f.id, pt.id, file) }} />
+                            </label>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+
+      <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 18 }}
+        onClick={async () => { await api(`/api/v1/ppi/${insp.id}/done`, { method: 'POST' }); setMsg({ kind: 'ok', text: 'Inspecao marcada como concluida. Ja esta tudo guardado.' }) }}>
+        Concluir inspecao <i className="ti ti-circle-check" aria-hidden="true"></i>
+      </button>
+      <p className="hint" style={{ marginTop: 8, textAlign: 'center' }}>O relatorio em PDF vem no proximo pacote.</p>
+    </main>
+  )
+}
+
 function SyncQueue({ onBack }: { onBack: () => void }) {
   const [items, setItems] = useState<any[]>([])
   const [busy, setBusy] = useState(false)
