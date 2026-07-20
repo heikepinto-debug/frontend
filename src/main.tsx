@@ -2563,7 +2563,7 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
                             {a.url && <a href={a.url} target="_blank" rel="noreferrer" className="ppi-attach-view"><i className="ti ti-paperclip" aria-hidden="true"></i> Ver anexo</a>}
                             <label className="btn-ghost btn-sm">
                               <i className={`ti ${f.field_type === 'photo' ? 'ti-camera' : 'ti-file-upload'}`} aria-hidden="true"></i> {a.url ? 'Substituir' : (f.field_type === 'photo' ? 'Foto' : 'Ficheiro')}
-                              <input type="file" accept={f.field_type === 'photo' ? 'image/*' : 'application/pdf,image/*'} style={{ display: 'none' }}
+                              <input type="file" accept={f.field_type === 'photo' ? 'image/*' : 'application/pdf,image/*'} {...(f.field_type === 'photo' ? { capture: 'environment' } : {})} style={{ display: 'none' }}
                                 onChange={e => { const file = e.target.files?.[0]; if (file) attach(f.id, pt.id, file) }} />
                             </label>
                           </div>
