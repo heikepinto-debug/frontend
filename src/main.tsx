@@ -158,6 +158,7 @@ function Shell() {
   const navItems = [
     nav('home', 'Painel', 'ti-layout-dashboard'),
     canDo('reception:create') && nav('reception', 'Nova recepção', 'ti-plus'),
+    canDo('reception:create') && nav('reception-quick', 'Entrada rápida', 'ti-bolt'),
     canDo('reception:read') && nav('list', 'Recepções', 'ti-list-details', summary?.inShop),
     authCount > 0 && nav('authorizations', 'Autorizações', 'ti-clipboard-check', authCount, true),
     canDo('reception:create') && nav('bookings', 'Marcações', 'ti-calendar-event', bookingCount || undefined, bookingCount > 0),
@@ -694,16 +695,24 @@ function Reception({ onDone, onBack, resumeDraftId, quick }: { onDone: () => voi
   }
 
   const toggleService = (t: any) => {
+    const ehPPI = /ppi/i.test(t.name)
     setChosenServices(cur => {
       const ja = cur.find(x => x.serviceTypeId === t.id)
-      const novo = ja ? cur.filter(x => x.serviceTypeId !== t.id)
-                      : [...cur, { serviceTypeId: t.id, typeName: t.name, clientPresence: t.client_presence }]
-      // Valor por omissão da presença: se algum serviço é de deixar, assume
-      // deixar; senão, espera. Só mexe enquanto o Yury não decidir à mão.
-      if (!presenceTouched) {
-        setPresence(novo.some(x => x.clientPresence === 'leaves') ? 'leaves'
-                    : novo.length ? 'waits' : null)
+      if (ja) {
+        // desmarcar
+        const novo = cur.filter(x => x.serviceTypeId !== t.id)
+        if (!presenceTouched) setPresence(novo.some(x => x.clientPresence === 'leaves') ? 'leaves' : novo.length ? 'waits' : null)
+        return novo
       }
+      // PPI é serviço único: escolher um PPI limpa o resto, e escolher outro
+      // serviço quando há um PPI substitui-o. Não se combina inspeção de
+      // compra com reparações — o que o PPI revelar vira uma OS depois.
+      const jaTemPPI = cur.some(x => /ppi/i.test(x.typeName))
+      let novo
+      if (ehPPI) novo = [{ serviceTypeId: t.id, typeName: t.name, clientPresence: t.client_presence }]
+      else if (jaTemPPI) novo = [{ serviceTypeId: t.id, typeName: t.name, clientPresence: t.client_presence }]
+      else novo = [...cur, { serviceTypeId: t.id, typeName: t.name, clientPresence: t.client_presence }]
+      if (!presenceTouched) setPresence(novo.some(x => x.clientPresence === 'leaves') ? 'leaves' : novo.length ? 'waits' : null)
       return novo
     })
   }
@@ -1096,7 +1105,7 @@ function Reception({ onDone, onBack, resumeDraftId, quick }: { onDone: () => voi
           {serviceTypes.length > 0 && (
             <>
               <label className="fl">Tipo de serviço <span className="req">*</span></label>
-              <p className="hint" style={{ marginBottom: 8 }}>Um carro pode trazer mais que um. Toca para escolher.</p>
+              <p className="hint" style={{ marginBottom: 8 }}>Um carro pode trazer mais que um. Toca para escolher.{chosenServices.some(x => /ppi/i.test(x.typeName)) && ' O PPI é uma inspeção à parte — não se combina com outros serviços.'}</p>
               <div className="svc-type-grid">
                 {serviceTypes.map(t => {
                   const on = chosenServices.some(x => x.serviceTypeId === t.id)
