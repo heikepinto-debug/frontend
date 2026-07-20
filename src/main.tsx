@@ -487,6 +487,8 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   const [unitId, setUnitId] = useState('')
   const [serviceTypes, setServiceTypes] = useState<any[]>([])      // catálogo de tipos da oficina
   const [chosenServices, setChosenServices] = useState<any[]>([])  // serviços escolhidos p/ este carro
+  const [presence, setPresence] = useState<'waits' | 'leaves' | null>(null)  // decidido à entrada
+  const [presenceTouched, setPresenceTouched] = useState(false)   // o Yury já mexeu à mão?
 
   const [km, setKm] = useState(''); const [fuel, setFuel] = useState(2)
   const [checklist, setChecklist] = useState<Record<string, boolean>>({})
@@ -551,6 +553,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       setKm(d.km_entry != null ? String(d.km_entry) : '')
       setFuel(d.fuel_level ?? 2)
       setIsNonRunner(!!d.is_non_runner)
+      if (d.client_presence) { setPresence(d.client_presence); setPresenceTouched(true) }
       if (d.entry_pending_reason) { setEntryPending(true); setPendingReason(d.entry_pending_reason) }
       setValuables(d.declared_valuables || '')
       setChecklist(typeof d.checklist === 'string' ? JSON.parse(d.checklist) : (d.checklist || {}))
@@ -583,6 +586,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       batteryReference: batteryRef || undefined, systemsCheck,
       wantsOldParts: wantsOldParts ?? undefined,
       isNonRunner,
+      clientPresence: presence || undefined,
       entryPendingReason: entryPending ? pendingReason.trim() : undefined,
       intentions, services: chosenServices.map(({ serviceTypeId, typeName, notes }) => ({ serviceTypeId, typeName, notes })), serviceDescription: svcDesc || undefined,
       bookingDate: bookingDate || undefined,
@@ -663,8 +667,15 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   const toggleService = (t: any) => {
     setChosenServices(cur => {
       const ja = cur.find(x => x.serviceTypeId === t.id)
-      if (ja) return cur.filter(x => x.serviceTypeId !== t.id)
-      return [...cur, { serviceTypeId: t.id, typeName: t.name, clientPresence: t.client_presence }]
+      const novo = ja ? cur.filter(x => x.serviceTypeId !== t.id)
+                      : [...cur, { serviceTypeId: t.id, typeName: t.name, clientPresence: t.client_presence }]
+      // Valor por omissão da presença: se algum serviço é de deixar, assume
+      // deixar; senão, espera. Só mexe enquanto o Yury não decidir à mão.
+      if (!presenceTouched) {
+        setPresence(novo.some(x => x.clientPresence === 'leaves') ? 'leaves'
+                    : novo.length ? 'waits' : null)
+      }
+      return novo
     })
   }
 
@@ -702,7 +713,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
     switch (step) {
       case 0: return !!existingCust || (newCust && custName.trim().length >= 2 && V.phone(custPhone) && V.email(custEmail))
       case 1: return !!existingVeh || (V.plate(plate) && V.year(vyear))  // ano opcional (V.year aceita vazio)
-      case 2: return chosenServices.length >= 1 && intentions.length >= 1
+      case 2: return chosenServices.length >= 1 && !!presence && intentions.length >= 1
       case 3: return valuables.trim().length > 0 && (entryPending ? pendingReason.trim().length >= 3 : V.km(km)) && wantsOldParts !== null
       case 4: return true                       // danos são opcionais
       case 5: {
@@ -747,6 +758,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       batteryReference: batteryRef || undefined, systemsCheck,
       wantsOldParts: wantsOldParts ?? undefined,
       isNonRunner,
+      clientPresence: presence || undefined,
       entryPendingReason: entryPending ? pendingReason.trim() : undefined,
       intentions, services: chosenServices.map(({ serviceTypeId, typeName, notes }) => ({ serviceTypeId, typeName, notes })), serviceDescription: svcDesc || undefined,
       bookingDate: bookingDate || undefined,
@@ -1049,6 +1061,23 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
                   )
                 })}
               </div>
+
+              {chosenServices.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <label className="fl">O cliente vai…</label>
+                  <div className="seg-row">
+                    <button className={`seg ${presence === 'waits' ? 'on' : ''}`}
+                      onClick={() => { setPresence('waits'); setPresenceTouched(true) }}>
+                      <i className="ti ti-clock" aria-hidden="true"></i> Esperar pelo carro
+                    </button>
+                    <button className={`seg ${presence === 'leaves' ? 'on' : ''}`}
+                      onClick={() => { setPresence('leaves'); setPresenceTouched(true) }}>
+                      <i className="ti ti-home-move" aria-hidden="true"></i> Deixar o carro
+                    </button>
+                  </div>
+                  <p className="hint" style={{ marginTop: 6 }}>Já vem escolhido pelo tipo de serviço — muda se este cliente for exceção.</p>
+                </div>
+              )}
             </>
           )}
 
@@ -1906,6 +1935,9 @@ function ReceptionDetail({ joId, onBack, onResume, isOwner, onOpenOther, onOpenO
               </span>
             ))}
           </div>
+          {jo.client_presence && (
+            <Row label="Cliente" value={jo.client_presence === 'waits' ? 'Esperou pelo carro' : 'Deixou o carro'} />
+          )}
         </div>
       )}
 
@@ -2277,7 +2309,7 @@ function ServiceTypes({ onBack }: { onBack: () => void }) {
           <label className="fl">Nome <span className="req">*</span></label>
           <input value={name} onChange={e => setName(e.target.value)} placeholder="ex: Reprogramação / Remap" />
 
-          <label className="fl" style={{ marginTop: 14 }}>O cliente…</label>
+          <label className="fl" style={{ marginTop: 14 }}>Por omissão, o cliente…</label>
           <div className="seg-row">
             <button className={`seg ${presence === 'waits' ? 'on' : ''}`} onClick={() => setPresence('waits')}>Espera pelo carro</button>
             <button className={`seg ${presence === 'leaves' ? 'on' : ''}`} onClick={() => setPresence('leaves')}>Deixa o carro</button>
@@ -2305,7 +2337,7 @@ function ServiceTypes({ onBack }: { onBack: () => void }) {
               <div key={t.id} className={`stype-row ${!t.active ? 'off' : ''}`}>
                 <div className="stype-main" onClick={() => openEdit(t)}>
                   <div className="stype-name">{t.name}{!t.active && <span className="stype-off-tag">desactivado</span>}</div>
-                  <div className="stype-sub">{t.client_presence === 'waits' ? 'Cliente espera pelo carro' : 'Cliente deixa o carro'}</div>
+                  <div className="stype-sub">Por omissão: {t.client_presence === 'waits' ? 'cliente espera' : 'deixa o carro'}</div>
                 </div>
                 <button className="btn-ghost btn-sm" onClick={() => toggleActive(t)} title={t.active ? 'Desactivar' : 'Reactivar'}>
                   <i className={`ti ${t.active ? 'ti-eye-off' : 'ti-eye'}`} aria-hidden="true"></i>
