@@ -457,6 +457,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   const [terms, setTerms] = useState<any>(null)
   const [gps, setGps] = useState<{ lat: number; lng: number } | null>(null)
   const [draftId, setDraftId] = useState<string | null>(resumeDraftId || null)
+  const [draftLoadError, setDraftLoadError] = useState<string | null>(null)
   const [savingDraft, setSavingDraft] = useState(false)
   const [bookingDate, setBookingDate] = useState('')     // marcação do cliente (opcional)
 
@@ -549,6 +550,11 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       for (const p of (ps || [])) if (p.url) jaLa[p.zone] = { id: p.id, url: p.url }
       setServerPhotos(jaLa)
       setExistingCust({ id: d.customer_id, full_name: d.customer_name, phone: d.customer_phone })
+      // Carregar as viaturas do cliente — senão o passo da viatura fica vazio
+      // e a viatura do rascunho não aparece (parece um registo novo).
+      if (d.customer_id) {
+        api(`/api/v1/customers/${d.customer_id}/vehicles`).then(r => setCustVehicles(r.data || [])).catch(() => {})
+      }
       setExistingVeh({ id: d.vehicle_id, plate: d.plate, brand: d.brand, model: d.model, year: d.year })
       setKm(d.km_entry != null ? String(d.km_entry) : '')
       setFuel(d.fuel_level ?? 2)
@@ -566,7 +572,12 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       setIntentions(ints)
       setSvcDesc(d.service_description || '')
       if (d.booking_date) setBookingDate(String(d.booking_date).slice(0, 16))
-    }).catch(() => {})
+    }).catch((e: any) => {
+      // Não cair para uma entrada em branco em silêncio: se o rascunho não
+      // carrega, o Yury tem de saber, senão parece uma entrada nova e ele
+      // recomeça do zero (e cria um duplicado).
+      setDraftLoadError(e?.message || 'Não foi possível carregar este rascunho. Verifica a ligação e tenta outra vez.')
+    })
   }, [resumeDraftId])
 
   // Guardar rascunho (precisa de cliente + viatura)
@@ -834,6 +845,23 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       setResult({ number: 'Pendente (offline)', offline: true })
     } finally { setBusy(false) }
   }
+
+  if (draftLoadError) return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Voltar</button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Rascunho</h2><span />
+      </div>
+      <div className="pending-box">
+        <div className="pending-head" style={{ color: 'var(--danger)' }}><i className="ti ti-alert-triangle" aria-hidden="true"></i> Não foi possível abrir o rascunho</div>
+        <p>{draftLoadError}</p>
+        <p><strong>Não recomeces a entrada por aqui</strong> — o rascunho não se perdeu, está guardado. Volta à lista e tenta abri-lo outra vez daqui a um momento.</p>
+      </div>
+      <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 16 }} onClick={onBack}>
+        Voltar à lista
+      </button>
+    </main>
+  )
 
   if (erroFinal) return (
     <main className="reception">
