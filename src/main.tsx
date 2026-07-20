@@ -2510,16 +2510,13 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
           <div className="ppi-cust">{insp.customer_name} - {insp.jo_number}</div>
         </div>
         <div className="ppi-level">
-          {['basic', 'standard', 'premium'].map(l => (
-            <button key={l} className={`ppi-lvl ${insp.level === l ? 'on' : ''}`}
-              onClick={async () => {
-                await api(`/api/v1/ppi/${insp.id}/level`, { method: 'PATCH', body: JSON.stringify({ level: l }) })
-                const tpl = await api(`/api/v1/ppi/template?level=${l}`)
-                setTree(tpl.sections || []); setInsp({ ...insp, level: l })
-              }}>
-              {l === 'basic' ? 'Basico' : l === 'standard' ? 'Standard' : 'Premium'}
-            </button>
-          ))}
+          {/* O nível fixa-se na entrada — é uma decisão comercial (o cliente
+              pagou um nível). Mudar a meio abriria divergência entre o cobrado
+              e o feito, e fraude ao ligar ao orçamento. Mostra-se, não se muda.
+              O upgrade formal (com nova cobrança) fica para a Fase 5. */}
+          <span className="ppi-level-fixed">
+            {insp.level === 'basic' ? 'PPI Básico' : insp.level === 'standard' ? 'PPI Standard' : 'PPI Premium'}
+          </span>
         </div>
       </div>
       <div className="ppi-progress"><div className="ppi-progress-bar" style={{ width: total ? `${Math.round(done / total * 100)}%` : '0%' }} /></div>

@@ -795,3 +795,5 @@ textarea { resize: vertical; line-height: 1.55; }
 .ppi-attach { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ppi-attach-view { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--brand); text-decoration: none; }
 .ppi-attach label.btn-ghost { cursor: pointer; }
+.ppi-level-fixed { display: inline-flex; align-items: center; padding: 6px 13px; border-radius: 8px;
+  background: var(--brand-bg); color: var(--brand-dark); font-size: 13px; font-weight: 700; border: 1.5px solid var(--brand-border); }
