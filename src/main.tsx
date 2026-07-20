@@ -98,7 +98,7 @@ function Shell() {
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
   const [temUpdate, setTemUpdate] = useState(false)   // há versão nova à espera
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
@@ -161,6 +161,7 @@ function Shell() {
     authCount > 0 && nav('authorizations', 'Autorizações', 'ti-clipboard-check', authCount, true),
     canDo('reception:create') && nav('bookings', 'Marcações', 'ti-calendar-event', bookingCount || undefined, bookingCount > 0),
     nav('tasks', 'Tarefas', 'ti-checklist'),
+    canDo('config:manage') && nav('servicetypes', 'Tipos de serviço', 'ti-tool'),
   ].filter(Boolean) as any[]
 
   const go = (v: string) => { setView(v as any); setNavOpen(false) }
@@ -204,7 +205,7 @@ function Shell() {
         </nav>
 
         <div className="sidebar-foot">
-          <div className="sidebar-ver" title="Versão desta aplicação">v{__APP_VERSION__}</div>
+          <div className="sidebar-ver" title="Versão desta aplicação"><strong>{__APP_PACKAGE__}</strong> · {__APP_VERSION__}</div>
           <button className={`nav-item ${view === 'password' ? 'active' : ''}`} onClick={() => go('password')}>
             <i className="ti ti-key" aria-hidden="true"></i><span className="nav-label">A minha senha</span>
           </button>
@@ -323,6 +324,7 @@ function Shell() {
       {view === 'sign' && signId && <CompleteSignature joId={signId} onBack={() => setView('list')} onDone={() => { setSignId(undefined); setView('list') }} />}
       {view === 'complete' && completeId && <CompleteEntry joId={completeId} onBack={() => setView('list')} onDone={() => { setCompleteId(undefined); setView('list') }} />}
       {view === 'queue' && <SyncQueue onBack={() => setView('home')} />}
+      {view === 'servicetypes' && <ServiceTypes onBack={() => setView('home')} />}
       {view === 'password' && <ChangePassword onBack={() => setView('home')} />}
       {view === 'errorlogs' && <ErrorLogs onBack={() => setView('home')} />}
       {view === 'tasks' && <Tasks onBack={() => setView('home')} isOwner={isOwner} myId={user?.id || ''} />}
@@ -483,7 +485,8 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   const [intentInput, setIntentInput] = useState('')
   const [svcDesc, setSvcDesc] = useState('')
   const [unitId, setUnitId] = useState('')
-  const [services, setServices] = useState<any[]>([])          // catálogo, só p/ sugestões
+  const [serviceTypes, setServiceTypes] = useState<any[]>([])      // catálogo de tipos da oficina
+  const [chosenServices, setChosenServices] = useState<any[]>([])  // serviços escolhidos p/ este carro
 
   const [km, setKm] = useState(''); const [fuel, setFuel] = useState(2)
   const [checklist, setChecklist] = useState<Record<string, boolean>>({})
@@ -521,6 +524,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   useEffect(() => {
     api('/api/v1/business-units').then(r => { setUnits(r.data); if (r.data[0]) setUnitId(r.data[0].id) }).catch(() => {})
     api('/api/v1/terms/active').then(setTerms).catch(() => {})
+    api('/api/v1/service-types').then(r => setServiceTypes(r.data || [])).catch(() => {})
     api('/api/v1/terms/non_runner').then(setNonRunnerTerms).catch(() => {})
     // Pop-up do dever de diagnóstico (se ligado) — só numa entrada nova, não ao retomar rascunho
     if (!resumeDraftId) {
@@ -534,7 +538,10 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   // Retomar rascunho: carrega e preenche os campos
   useEffect(() => {
     if (!resumeDraftId) return
-    api(`/api/v1/receptions/${resumeDraftId}/draft`).then(({ data: d, photos: ps }) => {
+    api(`/api/v1/receptions/${resumeDraftId}/draft`).then(({ data: d, photos: ps, servicos }) => {
+      if (servicos?.length) setChosenServices(servicos.map((sv: any) => ({
+        serviceTypeId: sv.service_type_id, typeName: sv.type_name, notes: sv.notes || undefined,
+      })))
       // Fotos já enviadas neste rascunho — não se voltam a tirar nem a enviar.
       const jaLa: Record<string, { id: string; url: string }> = {}
       for (const p of (ps || [])) if (p.url) jaLa[p.zone] = { id: p.id, url: p.url }
@@ -577,7 +584,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       wantsOldParts: wantsOldParts ?? undefined,
       isNonRunner,
       entryPendingReason: entryPending ? pendingReason.trim() : undefined,
-      intentions, serviceDescription: svcDesc || undefined,
+      intentions, services: chosenServices.map(({ serviceTypeId, typeName, notes }) => ({ serviceTypeId, typeName, notes })), serviceDescription: svcDesc || undefined,
       bookingDate: bookingDate || undefined,
     }
     try {
@@ -653,6 +660,14 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
     e.target.value = ''
   }
 
+  const toggleService = (t: any) => {
+    setChosenServices(cur => {
+      const ja = cur.find(x => x.serviceTypeId === t.id)
+      if (ja) return cur.filter(x => x.serviceTypeId !== t.id)
+      return [...cur, { serviceTypeId: t.id, typeName: t.name, clientPresence: t.client_presence }]
+    })
+  }
+
   const addIntention = (v: string) => {
     const t = v.trim()
     if (t && !intentions.includes(t)) setIntentions(xs => [...xs, t])
@@ -679,13 +694,15 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   // Rede de segurança: detecção por palavras-chave é frágil (um termo que não
   // esteja aqui escapa ao aviso). Solução definitiva = tipo de serviço explícito
   // e configurável por oficina. Até lá, alargámos a lista.
-  const isRemapDyno = intentions.some(i => /remap|reprogram|dyno|dinamómetro|dinamometro|tune|tuning|stage|potência|potencia|mapa|unichip|uni-chip|chip|piggyback|piggy-back|ecu|centralina|afina|pops|bangs|launch|hardcut|hard cut|adblue|dpf|egr/i.test(i))
+  // Já não se adivinha por palavras: o tipo é escolhido. Um serviço cujo
+  // nome sugira remap/dyno/unichip liga o aviso e os T&C próprios.
+  const isRemapDyno = chosenServices.some(sv => /remap|reprogram|dyno|tune|stage|unichip|chip|ecu|centralina|pops|bangs|launch|adblue|dpf|egr/i.test(sv.typeName || ''))
 
   const canNext = (): boolean => {
     switch (step) {
       case 0: return !!existingCust || (newCust && custName.trim().length >= 2 && V.phone(custPhone) && V.email(custEmail))
       case 1: return !!existingVeh || (V.plate(plate) && V.year(vyear))  // ano opcional (V.year aceita vazio)
-      case 2: return intentions.length >= 1
+      case 2: return chosenServices.length >= 1 && intentions.length >= 1
       case 3: return valuables.trim().length > 0 && (entryPending ? pendingReason.trim().length >= 3 : V.km(km)) && wantsOldParts !== null
       case 4: return true                       // danos são opcionais
       case 5: {
@@ -731,7 +748,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       wantsOldParts: wantsOldParts ?? undefined,
       isNonRunner,
       entryPendingReason: entryPending ? pendingReason.trim() : undefined,
-      intentions, serviceDescription: svcDesc || undefined,
+      intentions, services: chosenServices.map(({ serviceTypeId, typeName, notes }) => ({ serviceTypeId, typeName, notes })), serviceDescription: svcDesc || undefined,
       bookingDate: bookingDate || undefined,
       termsVersion: terms?.version || '1.0',
       termsAcceptedAt: new Date().toISOString(),
@@ -1014,31 +1031,42 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
       {step === 2 && (
         <section>
           <h2>O que traz o cliente</h2>
-          <p className="lead">Escreve tudo o que o cliente pediu ou relatou. Podes adicionar vários. O serviço a executar define-se depois, no diagnóstico.</p>
+          <p className="lead">Escolhe o tipo (ou tipos) de serviço, e escreve o que o cliente pediu por palavras dele.</p>
 
-          <label className="fl">Intenção do cliente <span className="req">*</span></label>
+          {serviceTypes.length > 0 && (
+            <>
+              <label className="fl">Tipo de serviço <span className="req">*</span></label>
+              <p className="hint" style={{ marginBottom: 8 }}>Um carro pode trazer mais que um. Toca para escolher.</p>
+              <div className="svc-type-grid">
+                {serviceTypes.map(t => {
+                  const on = chosenServices.some(x => x.serviceTypeId === t.id)
+                  return (
+                    <button key={t.id} className={`svc-type ${on ? 'on' : ''}`} onClick={() => toggleService(t)}>
+                      <span className="svc-type-check">{on && <i className="ti ti-check" aria-hidden="true"></i>}</span>
+                      <span className="svc-type-name">{t.name}</span>
+                      <span className="svc-type-pres">{t.client_presence === 'waits' ? 'cliente espera' : 'deixa o carro'}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </>
+          )}
+
+          <label className="fl" style={{ marginTop: 18 }}>O que o cliente relatou <span className="req">*</span></label>
           <div className="intent-input-row">
             <input value={intentInput}
               onChange={e => setIntentInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addIntention(intentInput) } }}
               placeholder="ex: barulho na frente, quer Stage 2, revisão…" list="svc-suggest" />
             <datalist id="svc-suggest">
-              {services.map(s => <option key={s.id} value={s.name} />)}
+              {serviceTypes.map(t => <option key={t.id} value={t.name} />)}
             </datalist>
             <button className="btn-primary" disabled={!intentInput.trim()} onClick={() => addIntention(intentInput)} style={{ padding: '12px 16px' }}>
               <i className="ti ti-plus" aria-hidden="true"></i>
             </button>
           </div>
 
-          {services.length > 0 && (
-            <div className="intent-suggest">
-              {services.slice(0, 8).map(s => (
-                <button key={s.id} className="intent-chip-suggest" onClick={() => addIntention(s.name)}>
-                  <i className="ti ti-plus" style={{ fontSize: 12 }} aria-hidden="true"></i>{s.name}
-                </button>
-              ))}
-            </div>
-          )}
+
 
           {intentions.length > 0 && (
             <div className="intent-list">
@@ -1868,6 +1896,19 @@ function ReceptionDetail({ joId, onBack, onResume, isOwner, onOpenOther, onOpenO
         {jo.is_non_runner && <Row label="Entrou a funcionar?" value="Não — entrou sem funcionar" />}
       </div>
 
+      {jo.servicos?.length > 0 && (
+        <div className="det-section">
+          <div className="det-section-title">Serviços</div>
+          <div className="det-chips">
+            {jo.servicos.map((sv: any) => (
+              <span key={sv.id} className="svc-chip">
+                <i className="ti ti-tool" aria-hidden="true"></i> {sv.type_name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="det-section">
         <div className="det-section-title">Intenção do cliente</div>
         {intentions.length
@@ -2186,6 +2227,99 @@ function CompleteEntry({ joId, onBack, onDone }: { joId: string; onBack: () => v
 // "a sincronizar 1…" para sempre, sem dizer o quê nem porquê. Isto
 // abre a caixa — mostra o que falta subir, o erro, e deixa forçar
 // o envio ou descartar o que é irrecuperável.
+// ── GESTÃO DE TIPOS DE SERVIÇO (só dono) ─────────────────────
+// Primeira peça do painel de gestão: a oficina cria, edita e
+// desactiva os seus tipos de serviço. Vem com base semeada, mas
+// nada fixo. Desactivar não apaga — o histórico mantém-se.
+function ServiceTypes({ onBack }: { onBack: () => void }) {
+  const [types, setTypes] = useState<any[]>([])
+  const [editing, setEditing] = useState<any>(null)   // tipo a editar, ou {} para novo
+  const [name, setName] = useState('')
+  const [presence, setPresence] = useState('leaves')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
+
+  const load = () => api('/api/v1/service-types?all=1').then(r => setTypes(r.data || [])).catch(() => {})
+  useEffect(() => { load() }, [])
+
+  const openNew = () => { setEditing({}); setName(''); setPresence('leaves') }
+  const openEdit = (t: any) => { setEditing(t); setName(t.name); setPresence(t.client_presence) }
+  const close = () => { setEditing(null); setName(''); setPresence('leaves') }
+
+  const save = async () => {
+    if (name.trim().length < 2) return
+    setBusy(true); setMsg(null)
+    try {
+      if (editing.id) await api(`/api/v1/service-types/${editing.id}`, { method: 'PATCH', body: JSON.stringify({ name, clientPresence: presence }) })
+      else await api('/api/v1/service-types', { method: 'POST', body: JSON.stringify({ name, clientPresence: presence }) })
+      close(); await load()
+    } catch (e: any) { setMsg({ kind: 'err', text: e?.message || 'Não foi possível guardar.' }) }
+    finally { setBusy(false) }
+  }
+
+  const toggleActive = async (t: any) => {
+    try { await api(`/api/v1/service-types/${t.id}`, { method: 'PATCH', body: JSON.stringify({ active: !t.active }) }); await load() }
+    catch (e: any) { setMsg({ kind: 'err', text: e?.message || 'Erro.' }) }
+  }
+
+  return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Tipos de serviço</h2><span />
+      </div>
+
+      {msg && <Banner msg={msg} onClose={() => setMsg(null)} />}
+
+      {editing ? (
+        <div className="task-form">
+          <div className="form-mode"><i className="ti ti-tool" aria-hidden="true"></i> {editing.id ? 'Editar tipo' : 'Novo tipo de serviço'}</div>
+          <label className="fl">Nome <span className="req">*</span></label>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="ex: Reprogramação / Remap" />
+
+          <label className="fl" style={{ marginTop: 14 }}>O cliente…</label>
+          <div className="seg-row">
+            <button className={`seg ${presence === 'waits' ? 'on' : ''}`} onClick={() => setPresence('waits')}>Espera pelo carro</button>
+            <button className={`seg ${presence === 'leaves' ? 'on' : ''}`} onClick={() => setPresence('leaves')}>Deixa o carro</button>
+          </div>
+
+          <div className="rec-nav">
+            <button className="btn-ghost" onClick={close}>Cancelar</button>
+            <button className="btn-primary" disabled={busy || name.trim().length < 2} onClick={save}>
+              {busy ? 'A guardar…' : editing.id ? 'Guardar' : 'Criar tipo'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <p className="hint" style={{ marginBottom: 14 }}>
+            Estes são os serviços que a oficina oferece. Aparecem à entrada, para o Yury escolher.
+            Desactivar um tipo tira-o da lista de escolha, mas mantém o histórico dos carros que já o usaram.
+          </p>
+          <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginBottom: 16 }} onClick={openNew}>
+            <i className="ti ti-plus" aria-hidden="true"></i> Novo tipo de serviço
+          </button>
+
+          <div className="stype-list">
+            {types.map(t => (
+              <div key={t.id} className={`stype-row ${!t.active ? 'off' : ''}`}>
+                <div className="stype-main" onClick={() => openEdit(t)}>
+                  <div className="stype-name">{t.name}{!t.active && <span className="stype-off-tag">desactivado</span>}</div>
+                  <div className="stype-sub">{t.client_presence === 'waits' ? 'Cliente espera pelo carro' : 'Cliente deixa o carro'}</div>
+                </div>
+                <button className="btn-ghost btn-sm" onClick={() => toggleActive(t)} title={t.active ? 'Desactivar' : 'Reactivar'}>
+                  <i className={`ti ${t.active ? 'ti-eye-off' : 'ti-eye'}`} aria-hidden="true"></i>
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </main>
+  )
+}
+
+// ── GESTÃO DE TIPOS DE SERVIÇO acaba aqui ────────────────────
 function SyncQueue({ onBack }: { onBack: () => void }) {
   const [items, setItems] = useState<any[]>([])
   const [busy, setBusy] = useState(false)
