@@ -27,6 +27,8 @@ interface Session {
   logout: () => void
   touch: () => void                          // regista actividade
   checkTimeout: () => boolean                // true se expirou (e faz logout)
+  lockedByTimeout: boolean                   // último logout foi por inatividade?
+  clearLockFlag: () => void
   can: (perm: string) => boolean
   hasModule: (code: string) => boolean
 }
@@ -36,9 +38,12 @@ export const useSession = create<Session>()(
     (set, get) => ({
       accessToken: null, refreshToken: null, lastActivity: Date.now(),
       user: null, roles: [], permissions: [], tenant: null,
+      lockedByTimeout: false,
+
+      clearLockFlag: () => set({ lockedByTimeout: false }),
 
       setSession: (s) => {
-        set({ ...s, lastActivity: Date.now() } as any)
+        set({ ...s, lastActivity: Date.now(), lockedByTimeout: false } as any)
         if (s.tenant) applyBranding(s.tenant as Tenant)
       },
 
@@ -61,10 +66,15 @@ export const useSession = create<Session>()(
       touch: () => { if (get().accessToken) set({ lastActivity: Date.now() }) },
 
       checkTimeout: () => {
-        const TIMEOUT = 12 * 60 * 60 * 1000   // 12 horas de inatividade
+        // Tablet partilhado no chão da oficina: 20 min de inatividade
+        // bloqueia a sessão. Curto o suficiente para o dispositivo não
+        // ficar aberto se alguém lhe pega, longo o suficiente para não
+        // chatear quem está a trabalhar.
+        const TIMEOUT = 20 * 60 * 1000   // 20 minutos de inatividade
         const { accessToken, lastActivity } = get()
         if (accessToken && Date.now() - lastActivity > TIMEOUT) {
           get().logout()
+          set({ lockedByTimeout: true })
           return true
         }
         return false

@@ -35,6 +35,7 @@ const updateSW = registerSW({
 // ────────────────────────────────────────────────────────────
 function Login() {
   const setSession = useSession(s => s.setSession)
+  const lockedByTimeout = useSession(s => s.lockedByTimeout)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [err, setErr] = useState('')
@@ -81,6 +82,7 @@ function Login() {
           <label className="fl" style={{ marginTop: 16 }}>Password</label>
           <input type="password" value={password} onChange={e => setPassword(e.target.value)}
             placeholder="••••••••" autoComplete="current-password" required />
+          {lockedByTimeout && !err && <div className="info-lock"><i className="ti ti-lock" aria-hidden="true"></i> A sessão foi bloqueada por inatividade. Entra outra vez para continuar.</div>}
           {err && <div className="err-box">{err}</div>}
           <button className="btn-primary" disabled={busy} style={{ marginTop: 22, width: '100%', justifyContent: 'center' }}>
             {busy ? 'A entrar…' : 'Entrar'}

@@ -823,3 +823,6 @@ textarea { resize: vertical; line-height: 1.55; }
 .info-box { border-left: 4px solid var(--brand); background: var(--brand-bg); padding: 12px 15px; border-radius: 0 8px 8px 0; }
 .info-box-head { font-weight: 700; color: var(--brand-dark); font-size: 14px; display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
 .info-box p { font-size: 13px; color: var(--ink-2); margin: 0; }
+
+/* Aviso de sessão bloqueada por inatividade */
+.info-lock { display: flex; align-items: center; gap: 8px; background: #FEF3C7; color: #92400E; font-size: 13px; padding: 10px 13px; border-radius: 8px; margin-bottom: 12px; }
