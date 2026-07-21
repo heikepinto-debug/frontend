@@ -98,11 +98,12 @@ function Shell() {
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
   const [temUpdate, setTemUpdate] = useState(false)   // há versão nova à espera
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'reception-quick' | 'ppi'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'reception-quick' | 'ppi' | 'ppi-list'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
   const [ppiJoId, setPpiJoId] = useState<string | null>(null)
+  const [ppiReturnTo, setPpiReturnTo] = useState<'list' | 'ppi-list'>('list')
   const [osReturnTo, setOsReturnTo] = useState<'list' | 'authorizations' | 'detail'>('list')
   const [signId, setSignId] = useState<string | undefined>(undefined)
   const [completeId, setCompleteId] = useState<string | undefined>(undefined)
@@ -160,6 +161,7 @@ function Shell() {
     canDo('reception:create') && nav('reception', 'Nova recepção', 'ti-plus'),
     canDo('reception:create') && nav('reception-quick', 'Entrada rápida', 'ti-bolt'),
     canDo('reception:read') && nav('list', 'Recepções', 'ti-list-details', summary?.inShop),
+    canDo('reception:read') && nav('ppi-list', 'Inspeções PPI', 'ti-clipboard-search'),
     authCount > 0 && nav('authorizations', 'Autorizações', 'ti-clipboard-check', authCount, true),
     canDo('reception:create') && nav('bookings', 'Marcações', 'ti-calendar-event', bookingCount || undefined, bookingCount > 0),
     nav('tasks', 'Tarefas', 'ti-checklist'),
@@ -320,9 +322,10 @@ function Shell() {
       )}
       {view === 'reception' && <Reception key={resumeDraftId || 'new'} resumeDraftId={resumeDraftId} onDone={() => { setResumeDraftId(undefined); setView('list') }} onBack={() => { setResumeDraftId(undefined); setView('home') }} />}
       {view === 'reception-quick' && <Reception key="quick" quick onDone={() => { setView('list') }} onBack={() => setView('home')} />}
-      {view === 'ppi' && ppiJoId && <PPICircuit joId={ppiJoId} onBack={() => setView('list')} />}
+      {view === 'ppi' && ppiJoId && <PPICircuit joId={ppiJoId} onBack={() => setView(ppiReturnTo)} />}
+      {view === 'ppi-list' && <PPIList onBack={() => setView('home')} onOpen={(joId: string) => { setPpiJoId(joId); setPpiReturnTo('ppi-list'); setView('ppi') }} />}
       {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
-        onOpenPPI={(id: string) => { setPpiJoId(id); setView('ppi') }}
+        onOpenPPI={(id: string) => { setPpiJoId(id); setPpiReturnTo('list'); setView('ppi') }}
         onSign={(id: string) => { setSignId(id); setView('sign') }}
         onComplete={(id: string) => { setCompleteId(id); setView('complete') }} />}
       {view === 'detail' && detailId && <ReceptionDetail joId={detailId} onBack={() => setView('list')}
@@ -1795,7 +1798,9 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
                 </button>
               )}
               {!isDraft && r.signed_at && r.has_ppi && onOpenPPI && (
-                <button className="btn-primary btn-sm" onClick={() => onOpenPPI(r.id)} title="Abrir inspeção PPI"><i className="ti ti-clipboard-search" aria-hidden="true"></i> {r.ppi_id ? 'Continuar PPI' : 'Abrir PPI'}</button>
+                r.ppi_status === 'done'
+                  ? <button className="btn-ghost btn-sm" onClick={() => onOpenPPI(r.id)} title="Ver inspeção PPI concluída"><i className="ti ti-clipboard-check" aria-hidden="true"></i> PPI concluído</button>
+                  : <button className="btn-primary btn-sm" onClick={() => onOpenPPI(r.id)} title="Abrir inspeção PPI"><i className="ti ti-clipboard-search" aria-hidden="true"></i> {r.ppi_id ? 'Continuar PPI' : 'Abrir PPI'}</button>
               )}
               {!isDraft && r.signed_at && r.status !== 'delivered' && onOpenOS && !incompleta && !r.has_ppi && (
                 r.os_opened_at
@@ -2425,6 +2430,66 @@ function ServiceTypes({ onBack }: { onBack: () => void }) {
 // ── CIRCUITO PPI — inspeção com autosave (nada se perde) ─────
 // Cada campo guarda-se assim que perde o foco ou muda. Se o
 // telemóvel morre a meio, o que já foi metido está no servidor.
+// ── MENU DE PPIs — lista de todas as inspeções ───────────────
+function PPIList({ onBack, onOpen }: { onBack: () => void; onOpen: (joId: string) => void }) {
+  const [rows, setRows] = useState<any[]>([])
+  const [filtro, setFiltro] = useState<'' | 'in_progress' | 'done'>('')
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState<string | null>(null)
+
+  const carregar = () => {
+    setLoading(true)
+    api(`/api/v1/ppi${filtro ? `?status=${filtro}` : ''}`)
+      .then(r => { setRows(r.inspections || []); setErr(null) })
+      .catch(e => setErr(e?.message || 'Não foi possível carregar as inspeções.'))
+      .finally(() => setLoading(false))
+  }
+  useEffect(carregar, [filtro])
+
+  const nivelLabel = (l: string) => l === 'basic' ? 'Básico' : l === 'standard' ? 'Standard' : 'Premium'
+  const fmtData = (s: string) => { try { return new Date(s).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short' }) } catch { return '' } }
+
+  return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 14 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Voltar</button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Inspeções PPI</h2><span />
+      </div>
+
+      <div className="ppi-filter">
+        <button className={`ppi-filter-btn ${filtro === '' ? 'on' : ''}`} onClick={() => setFiltro('')}>Todas</button>
+        <button className={`ppi-filter-btn ${filtro === 'in_progress' ? 'on' : ''}`} onClick={() => setFiltro('in_progress')}>Em curso</button>
+        <button className={`ppi-filter-btn ${filtro === 'done' ? 'on' : ''}`} onClick={() => setFiltro('done')}>Concluídas</button>
+      </div>
+
+      {loading && <p className="hint" style={{ marginTop: 20 }}>A carregar…</p>}
+      {err && <div className="pending-box"><p style={{ color: 'var(--danger)' }}>{err}</p></div>}
+      {!loading && !err && rows.length === 0 && (
+        <div className="empty-state" style={{ marginTop: 30 }}>
+          <i className="ti ti-clipboard-search" aria-hidden="true" style={{ fontSize: 32, color: 'var(--ink-3)' }}></i>
+          <p className="hint">Ainda não há inspeções {filtro === 'done' ? 'concluídas' : filtro === 'in_progress' ? 'em curso' : ''}.</p>
+        </div>
+      )}
+
+      {!loading && rows.map(r => (
+        <button key={r.id} className="ppi-row" onClick={() => onOpen(r.job_order_id || r.jo_id)}>
+          <div className="ppi-row-main">
+            <div className="ppi-row-veh">{r.plate} · {r.brand} {r.model}</div>
+            <div className="ppi-row-sub">{r.customer_name} · {r.jo_number}</div>
+          </div>
+          <div className="ppi-row-side">
+            <span className={`ppi-badge ${r.status === 'done' ? 'done' : 'prog'}`}>
+              {r.status === 'done' ? 'Concluída' : 'Em curso'}
+            </span>
+            <span className="ppi-row-lvl">{nivelLabel(r.level)}</span>
+            <span className="ppi-row-date">{fmtData(r.done_at || r.started_at)}</span>
+          </div>
+        </button>
+      ))}
+    </main>
+  )
+}
+
 function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
   const [insp, setInsp] = useState<any>(null)
   const [tree, setTree] = useState<any[]>([])
@@ -2576,8 +2641,14 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
       ))}
 
       <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 18 }}
-        onClick={async () => { await api(`/api/v1/ppi/${insp.id}/done`, { method: 'POST' }); setMsg({ kind: 'ok', text: 'Inspecao marcada como concluida. Ja esta tudo guardado.' }) }}>
-        Concluir inspecao <i className="ti ti-circle-check" aria-hidden="true"></i>
+        onClick={async () => {
+          await api(`/api/v1/ppi/${insp.id}/done`, { method: 'POST' })
+          setInsp({ ...insp, status: 'done' })
+          setMsg({ kind: 'ok', text: 'Inspeção concluída. Está tudo guardado.' })
+          // Volta à lista passado um instante, para o ciclo fechar.
+          setTimeout(() => onBack(), 1200)
+        }}>
+        {insp.status === 'done' ? 'Inspeção concluída' : 'Concluir inspeção'} <i className="ti ti-circle-check" aria-hidden="true"></i>
       </button>
       <p className="hint" style={{ marginTop: 8, textAlign: 'center' }}>O relatorio em PDF vem no proximo pacote.</p>
     </main>
