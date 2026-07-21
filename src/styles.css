@@ -813,3 +813,13 @@ textarea { resize: vertical; line-height: 1.55; }
 .ppi-row-lvl { font-size: 12px; color: var(--ink-2); font-weight: 600; }
 .ppi-row-date { font-size: 12px; color: var(--ink-3); min-width: 44px; text-align: right; }
 .empty-state { text-align: center; padding: 30px 20px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+
+/* Caixa de aviso (entrada completa exigida) */
+.warn-box { border-left: 4px solid #D97706; background: #FFFBEB; padding: 12px 15px; border-radius: 0 8px 8px 0; }
+.warn-box-head { font-weight: 700; color: #B45309; font-size: 14px; display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.warn-box p { font-size: 13px; color: #92400E; margin: 0; }
+
+/* Caixa informativa (entrada completa automática) */
+.info-box { border-left: 4px solid var(--brand); background: var(--brand-bg); padding: 12px 15px; border-radius: 0 8px 8px 0; }
+.info-box-head { font-weight: 700; color: var(--brand-dark); font-size: 14px; display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.info-box p { font-size: 13px; color: var(--ink-2); margin: 0; }

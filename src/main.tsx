@@ -98,7 +98,7 @@ function Shell() {
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
   const [temUpdate, setTemUpdate] = useState(false)   // há versão nova à espera
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'reception-quick' | 'ppi' | 'ppi-list'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
@@ -159,7 +159,6 @@ function Shell() {
   const navItems = [
     nav('home', 'Painel', 'ti-layout-dashboard'),
     canDo('reception:create') && nav('reception', 'Nova recepção', 'ti-plus'),
-    canDo('reception:create') && nav('reception-quick', 'Entrada rápida', 'ti-bolt'),
     canDo('reception:read') && nav('list', 'Recepções', 'ti-list-details', summary?.inShop),
     canDo('reception:read') && nav('ppi-list', 'Inspeções PPI', 'ti-clipboard-search'),
     authCount > 0 && nav('authorizations', 'Autorizações', 'ti-clipboard-check', authCount, true),
@@ -287,12 +286,6 @@ function Shell() {
                 <span>Nova recepção</span>
               </button>
             )}
-            {canDo('reception:create') && (
-              <button className="quick-card" onClick={() => { setResumeDraftId(undefined); setView('reception-quick') }}>
-                <i className="ti ti-bolt" aria-hidden="true"></i>
-                <span>Entrada rápida</span>
-              </button>
-            )}
             {canDo('reception:read') && (
               <button className="quick-card" onClick={() => setView('list')}>
                 <i className="ti ti-list-details" aria-hidden="true"></i>
@@ -321,7 +314,6 @@ function Shell() {
         </main>
       )}
       {view === 'reception' && <Reception key={resumeDraftId || 'new'} resumeDraftId={resumeDraftId} onDone={() => { setResumeDraftId(undefined); setView('list') }} onBack={() => { setResumeDraftId(undefined); setView('home') }} />}
-      {view === 'reception-quick' && <Reception key="quick" quick onDone={() => { setView('list') }} onBack={() => setView('home')} />}
       {view === 'ppi' && ppiJoId && <PPICircuit joId={ppiJoId} onBack={() => setView(ppiReturnTo)} />}
       {view === 'ppi-list' && <PPIList onBack={() => setView('home')} onOpen={(joId: string) => { setPpiJoId(joId); setPpiReturnTo('ppi-list'); setView('ppi') }} />}
       {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
@@ -388,7 +380,7 @@ const SYSTEM_CHECKS = [
   'Buzina', 'Vidros eléctricos', 'Som / Rádio', 'Limpa-vidros', 'Fechos / Alarme',
 ]
 const CHECKLIST = ['Livrete / documentos','Chaves entregues','Triângulo + colete',
-  'Pneu suplente + macaco','Rádio com código','Tapetes originais']
+  'Pneu suplente + macaco','Rádio com código','Tapetes originais','Resguardo do motor (plástico)']
 
 // Zonas de dano por categoria (mapa de cima + zonas que não se veem de cima)
 const DMG_GROUPS: { group: string; icon: string; zones: string[] }[] = [
@@ -464,12 +456,15 @@ const V = {
 }
 
 
-function Reception({ onDone, onBack, resumeDraftId, quick }: { onDone: () => void; onBack: () => void; resumeDraftId?: string; quick?: boolean }) {
+function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBack: () => void; resumeDraftId?: string }) {
   const tenant = useSession(s => s.tenant)
   const [step, setStep] = useState(0)
-  // Entrada rápida: só o essencial — cliente, viatura, serviços, km, assinatura.
-  // Salta o estado detalhado, os danos e as 14 fotos. Serve PPI, diagnóstico e
-  // serviços rápidos, onde a ficha completa seria redundante.
+  // O modo de entrada decide-se DEPOIS dos serviços (não à partida):
+  //  - se algum serviço escolhido não permite rápida → obrigatoriamente completa
+  //  - se todos permitem → o Yury escolhe (rápida ou completa, o lado seguro)
+  // 'quick' é o modo efectivo; null = ainda não decidido.
+  const [entryMode, setEntryMode] = useState<'quick' | 'full' | null>(null)
+  const quick = entryMode === 'quick'
   const STEPS = quick ? [0, 1, 2, 6] : [0, 1, 2, 3, 4, 5, 6]
   const goNext = () => { const i = STEPS.indexOf(step); if (i < STEPS.length - 1) setStep(STEPS[i + 1]) }
   const goBack = () => { const i = STEPS.indexOf(step); if (i > 0) setStep(STEPS[i - 1]) }
@@ -508,6 +503,16 @@ function Reception({ onDone, onBack, resumeDraftId, quick }: { onDone: () => voi
   const [unitId, setUnitId] = useState('')
   const [serviceTypes, setServiceTypes] = useState<any[]>([])      // catálogo de tipos da oficina
   const [chosenServices, setChosenServices] = useState<any[]>([])  // serviços escolhidos p/ este carro
+  // Rápida só é possível se TODOS os serviços a permitirem. Basta um
+  // que não permita para o carro ir obrigatoriamente por completa.
+  const podeRapida = chosenServices.length > 0 && chosenServices.every(x => x.allowsQuickEntry)
+  const obrigaCompleta = chosenServices.length > 0 && chosenServices.some(x => !x.allowsQuickEntry)
+  // Se os serviços obrigam a completa, fixa o modo em 'full'. Se a escolha
+  // deixa de fazer sentido (sem serviços), limpa para reescolher.
+  useEffect(() => {
+    if (obrigaCompleta && entryMode !== 'full') setEntryMode('full')
+    if (chosenServices.length === 0 && entryMode) setEntryMode(null)
+  }, [obrigaCompleta, chosenServices.length])
   const [presence, setPresence] = useState<'waits' | 'leaves' | null>(null)  // decidido à entrada
   const [presenceTouched, setPresenceTouched] = useState(false)   // o Yury já mexeu à mão?
 
@@ -580,6 +585,7 @@ function Reception({ onDone, onBack, resumeDraftId, quick }: { onDone: () => voi
       setFuel(d.fuel_level ?? 2)
       setIsNonRunner(!!d.is_non_runner)
       if (d.client_presence) { setPresence(d.client_presence); setPresenceTouched(true) }
+      if (d.entry_type === 'quick' || d.entry_type === 'full') setEntryMode(d.entry_type)
       if (d.entry_pending_reason) { setEntryPending(true); setPendingReason(d.entry_pending_reason) }
       setValuables(d.declared_valuables || '')
       setChecklist(typeof d.checklist === 'string' ? JSON.parse(d.checklist) : (d.checklist || {}))
@@ -712,9 +718,9 @@ function Reception({ onDone, onBack, resumeDraftId, quick }: { onDone: () => voi
       // compra com reparações — o que o PPI revelar vira uma OS depois.
       const jaTemPPI = cur.some(x => /ppi/i.test(x.typeName))
       let novo
-      if (ehPPI) novo = [{ serviceTypeId: t.id, typeName: t.name, clientPresence: t.client_presence }]
-      else if (jaTemPPI) novo = [{ serviceTypeId: t.id, typeName: t.name, clientPresence: t.client_presence }]
-      else novo = [...cur, { serviceTypeId: t.id, typeName: t.name, clientPresence: t.client_presence }]
+      if (ehPPI) novo = [{ serviceTypeId: t.id, typeName: t.name, clientPresence: t.client_presence, allowsQuickEntry: t.allows_quick_entry }]
+      else if (jaTemPPI) novo = [{ serviceTypeId: t.id, typeName: t.name, clientPresence: t.client_presence, allowsQuickEntry: t.allows_quick_entry }]
+      else novo = [...cur, { serviceTypeId: t.id, typeName: t.name, clientPresence: t.client_presence, allowsQuickEntry: t.allows_quick_entry }]
       if (!presenceTouched) setPresence(novo.some(x => x.clientPresence === 'leaves') ? 'leaves' : novo.length ? 'waits' : null)
       return novo
     })
@@ -754,7 +760,7 @@ function Reception({ onDone, onBack, resumeDraftId, quick }: { onDone: () => voi
     switch (step) {
       case 0: return !!existingCust || (newCust && custName.trim().length >= 2 && V.phone(custPhone) && V.email(custEmail))
       case 1: return !!existingVeh || (V.plate(plate) && V.year(vyear))  // ano opcional (V.year aceita vazio)
-      case 2: return chosenServices.length >= 1 && !!presence && (quick ? V.km(km) : intentions.length >= 1)
+      case 2: return chosenServices.length >= 1 && !!presence && entryMode !== null && (quick ? V.km(km) : intentions.length >= 1)
       case 3: return valuables.trim().length > 0 && (entryPending ? pendingReason.trim().length >= 3 : V.km(km)) && wantsOldParts !== null
       case 4: return true                       // danos são opcionais
       case 5: {
@@ -1139,6 +1145,29 @@ function Reception({ onDone, onBack, resumeDraftId, quick }: { onDone: () => voi
                 </div>
               )}
             </>
+          )}
+
+          {/* Modo de entrada: escolha quando permitido, automático quando obrigatório */}
+          {chosenServices.length > 0 && (
+            obrigaCompleta ? (
+              <div className="info-box" style={{ marginTop: 16 }}>
+                <div className="info-box-head"><i className="ti ti-clipboard-list" aria-hidden="true"></i> Entrada completa</div>
+                <p>{chosenServices.filter(x => !x.allowsQuickEntry).map(x => x.typeName).join(', ')} exige registo completo (fotos e checklist), por isso este carro faz entrada completa.</p>
+              </div>
+            ) : podeRapida ? (
+              <div style={{ marginTop: 16 }}>
+                <label className="fl">Tipo de entrada</label>
+                <div className="seg-row">
+                  <button className={`seg ${entryMode === 'quick' ? 'on' : ''}`} onClick={() => setEntryMode('quick')}>
+                    <i className="ti ti-bolt" aria-hidden="true"></i> Rápida
+                  </button>
+                  <button className={`seg ${entryMode === 'full' ? 'on' : ''}`} onClick={() => setEntryMode('full')}>
+                    <i className="ti ti-clipboard-list" aria-hidden="true"></i> Completa
+                  </button>
+                </div>
+                <p className="hint" style={{ marginTop: 6 }}>Estes serviços permitem entrada rápida. Escolhe completa se preferires registar tudo com fotos.</p>
+              </div>
+            ) : null
           )}
 
           {quick && (
@@ -2343,22 +2372,23 @@ function ServiceTypes({ onBack }: { onBack: () => void }) {
   const [editing, setEditing] = useState<any>(null)   // tipo a editar, ou {} para novo
   const [name, setName] = useState('')
   const [presence, setPresence] = useState('leaves')
+  const [allowQuick, setAllowQuick] = useState(false)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
 
   const load = () => api('/api/v1/service-types?all=1').then(r => setTypes(r.data || [])).catch(() => {})
   useEffect(() => { load() }, [])
 
-  const openNew = () => { setEditing({}); setName(''); setPresence('leaves') }
-  const openEdit = (t: any) => { setEditing(t); setName(t.name); setPresence(t.client_presence) }
-  const close = () => { setEditing(null); setName(''); setPresence('leaves') }
+  const openNew = () => { setEditing({}); setName(''); setPresence('leaves'); setAllowQuick(false) }
+  const openEdit = (t: any) => { setEditing(t); setName(t.name); setPresence(t.client_presence); setAllowQuick(!!t.allows_quick_entry) }
+  const close = () => { setEditing(null); setName(''); setPresence('leaves'); setAllowQuick(false) }
 
   const save = async () => {
     if (name.trim().length < 2) return
     setBusy(true); setMsg(null)
     try {
-      if (editing.id) await api(`/api/v1/service-types/${editing.id}`, { method: 'PATCH', body: JSON.stringify({ name, clientPresence: presence }) })
-      else await api('/api/v1/service-types', { method: 'POST', body: JSON.stringify({ name, clientPresence: presence }) })
+      if (editing.id) await api(`/api/v1/service-types/${editing.id}`, { method: 'PATCH', body: JSON.stringify({ name, clientPresence: presence, allowsQuickEntry: allowQuick }) })
+      else await api('/api/v1/service-types', { method: 'POST', body: JSON.stringify({ name, clientPresence: presence, allowsQuickEntry: allowQuick }) })
       close(); await load()
     } catch (e: any) { setMsg({ kind: 'err', text: e?.message || 'Não foi possível guardar.' }) }
     finally { setBusy(false) }
@@ -2390,6 +2420,13 @@ function ServiceTypes({ onBack }: { onBack: () => void }) {
             <button className={`seg ${presence === 'leaves' ? 'on' : ''}`} onClick={() => setPresence('leaves')}>Deixa o carro</button>
           </div>
 
+          <label className="fl" style={{ marginTop: 14 }}>Modo de entrada</label>
+          <button className={`chk ${allowQuick ? 'on' : ''}`} style={{ width: '100%', justifyContent: 'flex-start' }} onClick={() => setAllowQuick(!allowQuick)}>
+            <span className="chk-box">{allowQuick && <i className="ti ti-check" aria-hidden="true"></i>}</span>
+            Permite entrada rápida
+          </button>
+          <p className="hint" style={{ marginTop: 6 }}>Por omissão, todos os serviços fazem entrada completa (14 fotos e checklist). Liga isto só para serviços rápidos onde a ficha completa é dispensável. Basta um serviço não permitir rápida para o carro todo ir pela completa.</p>
+
           <div className="rec-nav">
             <button className="btn-ghost" onClick={close}>Cancelar</button>
             <button className="btn-primary" disabled={busy || name.trim().length < 2} onClick={save}>
@@ -2412,7 +2449,7 @@ function ServiceTypes({ onBack }: { onBack: () => void }) {
               <div key={t.id} className={`stype-row ${!t.active ? 'off' : ''}`}>
                 <div className="stype-main" onClick={() => openEdit(t)}>
                   <div className="stype-name">{t.name}{!t.active && <span className="stype-off-tag">desactivado</span>}</div>
-                  <div className="stype-sub">Por omissão: {t.client_presence === 'waits' ? 'cliente espera' : 'deixa o carro'}</div>
+                  <div className="stype-sub">Por omissão: {t.client_presence === 'waits' ? 'cliente espera' : 'deixa o carro'}{t.allows_quick_entry ? ' · permite rápida' : ' · entrada completa'}</div>
                 </div>
                 <button className="btn-ghost btn-sm" onClick={() => toggleActive(t)} title={t.active ? 'Desactivar' : 'Reactivar'}>
                   <i className={`ti ${t.active ? 'ti-eye-off' : 'ti-eye'}`} aria-hidden="true"></i>
