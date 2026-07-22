@@ -162,7 +162,7 @@ function Shell() {
     nav('home', 'Painel', 'ti-layout-dashboard'),
     canDo('reception:create') && nav('reception', 'Nova recepção', 'ti-plus'),
     canDo('reception:read') && nav('list', 'Recepções', 'ti-list-details', summary?.inShop),
-    canDo('reception:read') && nav('ppi-list', 'Inspeções PPI', 'ti-clipboard-search'),
+    canDo('reception:read') && nav('ppi-list', 'Inspeções PPI', 'ti-clipboard-list'),
     authCount > 0 && nav('authorizations', 'Autorizações', 'ti-clipboard-check', authCount, true),
     canDo('reception:create') && nav('bookings', 'Marcações', 'ti-calendar-event', bookingCount || undefined, bookingCount > 0),
     nav('tasks', 'Tarefas', 'ti-checklist'),
@@ -2540,6 +2540,20 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
   const [shareBusy, setShareBusy] = useState(false)
   const canShare = useSession(s => s.can)('config:manage')   // só o dono
 
+  const abrirPdf = async () => {
+    setPdfBusy(true)
+    // Abre a aba já (com o gesto do utilizador), depois preenche o URL —
+    // evita o bloqueio de popup que acontece quando se abre após o await.
+    const win = window.open('', '_blank')
+    try {
+      const r = await api(`/api/v1/ppi/${insp.id}/pdf`)
+      if (r.url && win) { win.location.href = r.url }
+      else if (r.url) { window.location.href = r.url }
+      else { win?.close(); setMsg({ kind: 'err', text: 'Não foi possível gerar o PDF.' }) }
+    } catch { win?.close(); setMsg({ kind: 'err', text: 'Não foi possível gerar o PDF.' }) }
+    finally { setPdfBusy(false) }
+  }
+
   const criarLink = async (days: number) => {
     setShareBusy(true)
     try {
@@ -2651,6 +2665,25 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
       <div className="ppi-progress"><div className="ppi-progress-bar" style={{ width: total ? `${Math.round(done / total * 100)}%` : '0%' }} /></div>
       <p className="hint" style={{ marginBottom: 14 }}>{done} de {total} campos preenchidos. Guarda-se sozinho a medida que preenches.</p>
 
+      {/* Inspeção concluída: ações à cabeça, para não ter de rolar até ao fim. */}
+      {insp.status === 'done' && (
+        <div className="ppi-done-bar">
+          <div className="ppi-done-label"><i className="ti ti-circle-check" aria-hidden="true"></i> Inspeção concluída</div>
+          <div className="ppi-done-actions">
+            {canShare && insp.share_token && insp.share_expires_at && new Date(insp.share_expires_at) > new Date() && (
+              <button className="btn-ghost btn-sm" onClick={() => {
+                const url = `${window.location.origin}/r/${insp.share_token}`
+                navigator.clipboard?.writeText(url).then(() => setMsg({ kind: 'ok', text: 'Link copiado.' })).catch(() => setMsg({ kind: 'ok', text: url }))
+              }}><i className="ti ti-copy" aria-hidden="true"></i> Copiar link</button>
+            )}
+            {canShare && !(insp.share_token && insp.share_expires_at && new Date(insp.share_expires_at) > new Date()) && (
+              <button className="btn-primary btn-sm" onClick={() => criarLink(30)} disabled={shareBusy}><i className="ti ti-link" aria-hidden="true"></i> Criar link</button>
+            )}
+            <button className="btn-ghost btn-sm" onClick={abrirPdf} disabled={pdfBusy}><i className="ti ti-file-text" aria-hidden="true"></i> {pdfBusy ? 'A gerar…' : 'PDF'}</button>
+          </div>
+        </div>
+      )}
+
       {tree.map(sec => (
         <div key={sec.id} className="ppi-section">
           <button className="ppi-sec-head" onClick={() => setOpenSec(openSec === sec.id ? null : sec.id)}>
@@ -2755,12 +2788,7 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
 
       <button className="btn-ghost" style={{ width: '100%', justifyContent: 'center', marginTop: 8 }}
         disabled={pdfBusy}
-        onClick={async () => {
-          setPdfBusy(true)
-          try { const r = await api(`/api/v1/ppi/${insp.id}/pdf`); if (r.url) window.open(r.url, '_blank') }
-          catch { setMsg({ kind: 'err', text: 'Não foi possível gerar o relatório.' }) }
-          finally { setPdfBusy(false) }
-        }}>
+        onClick={abrirPdf}>
         <i className="ti ti-file-text" aria-hidden="true"></i> {pdfBusy ? 'A gerar…' : 'Descarregar PDF'}
       </button>
     </main>
