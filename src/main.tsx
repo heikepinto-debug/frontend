@@ -1820,7 +1820,7 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
               )}
               {incompleta && onComplete && (
                 <button className="btn-primary btn-sm" onClick={() => onComplete(r.id)} title="Registar o km e as fotos do painel">
-                  <i className="ti ti-battery-charging" aria-hidden="true"></i> Completar entrada
+                  <i className="ti ti-battery" aria-hidden="true"></i> Completar entrada
                 </button>
               )}
               {!isDraft && !r.signed_at && r.status !== 'delivered' && onSign && (
@@ -2529,6 +2529,71 @@ function PPIList({ onBack, onOpen }: { onBack: () => void; onOpen: (joId: string
   )
 }
 
+// ── Passo 1 do workflow PPI: caracterização do veículo ───────
+// Condiciona o resto do circuito (nos pacotes seguintes). Um ecrã,
+// guiado, otimizado para telemóvel — o padrão do novo workflow.
+function PPICharacterise({ insp, busy, onBack, onSave }: {
+  insp: any; busy: boolean; onBack: () => void
+  onSave: (fuel: string | null, drive: string | null, gear: string | null) => void
+}) {
+  const [fuel, setFuel] = useState<string | null>(insp.fuel_type || null)
+  const [drive, setDrive] = useState<string | null>(insp.drivetrain || null)
+  const [gear, setGear] = useState<string | null>(insp.gearbox || null)
+
+  const Opt = ({ val, cur, set, label, icon }: any) => (
+    <button className={`char-opt ${cur === val ? 'on' : ''}`} onClick={() => set(cur === val ? null : val)}>
+      {icon && <i className={`ti ${icon}`} aria-hidden="true"></i>}
+      <span>{label}</span>
+    </button>
+  )
+
+  return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 12 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Voltar</button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Caracterização</h2><span />
+      </div>
+
+      <div className="char-veh">{insp.plate} · {insp.brand} {insp.model}</div>
+      <div className="wf-step"><span className="wf-step-num">Passo 1</span> de que carro estamos a falar?</div>
+
+      <div className="char-group">
+        <label className="fl">Combustível</label>
+        <div className="char-opts">
+          <Opt val="gasolina" cur={fuel} set={setFuel} label="Gasolina" icon="ti-gas-station" />
+          <Opt val="diesel" cur={fuel} set={setFuel} label="Diesel" icon="ti-gas-station" />
+          <Opt val="hibrido" cur={fuel} set={setFuel} label="Híbrido" />
+          <Opt val="eletrico" cur={fuel} set={setFuel} label="Elétrico" />
+        </div>
+      </div>
+
+      <div className="char-group">
+        <label className="fl">Tração</label>
+        <div className="char-opts">
+          <Opt val="2wd" cur={drive} set={setDrive} label="2 rodas (2WD)" icon="ti-car" />
+          <Opt val="4x4" cur={drive} set={setDrive} label="4 rodas (4x4)" icon="ti-car" />
+        </div>
+        {drive === '4x4' && <p className="hint" style={{ marginTop: 6 }}>Nota: o dyno é 2WD — em 4x4, a potência avalia-se por outros meios.</p>}
+      </div>
+
+      <div className="char-group">
+        <label className="fl">Caixa <span className="opt-tag">opcional</span></label>
+        <div className="char-opts">
+          <Opt val="manual" cur={gear} set={setGear} label="Manual" />
+          <Opt val="automatica" cur={gear} set={setGear} label="Automática" />
+        </div>
+      </div>
+
+      <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 20 }}
+        disabled={busy || !fuel || !drive}
+        onClick={() => onSave(fuel, drive, gear)}>
+        {busy ? 'A guardar…' : 'Continuar para a inspeção'} <i className="ti ti-arrow-right" aria-hidden="true"></i>
+      </button>
+      {(!fuel || !drive) && <p className="hint" style={{ marginTop: 8, textAlign: 'center' }}>Escolhe pelo menos o combustível e a tração.</p>}
+    </main>
+  )
+}
+
 function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
   const [insp, setInsp] = useState<any>(null)
   const [tree, setTree] = useState<any[]>([])
@@ -2536,22 +2601,20 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
   const [openSec, setOpenSec] = useState<string | null>(null)
-  const [pdfBusy, setPdfBusy] = useState(false)
   const [shareBusy, setShareBusy] = useState(false)
+  const [charBusy, setCharBusy] = useState(false)
+  const [showChar, setShowChar] = useState(false)   // mostrar o ecrã de caracterização
   const canShare = useSession(s => s.can)('config:manage')   // só o dono
 
-  const abrirPdf = async () => {
-    setPdfBusy(true)
-    // Abre a aba já (com o gesto do utilizador), depois preenche o URL —
-    // evita o bloqueio de popup que acontece quando se abre após o await.
-    const win = window.open('', '_blank')
+  const guardarCaracterizacao = async (fuel: string | null, drive: string | null, gear: string | null) => {
+    setCharBusy(true)
     try {
-      const r = await api(`/api/v1/ppi/${insp.id}/pdf`)
-      if (r.url && win) { win.location.href = r.url }
-      else if (r.url) { window.location.href = r.url }
-      else { win?.close(); setMsg({ kind: 'err', text: 'Não foi possível gerar o PDF.' }) }
-    } catch { win?.close(); setMsg({ kind: 'err', text: 'Não foi possível gerar o PDF.' }) }
-    finally { setPdfBusy(false) }
+      await api(`/api/v1/ppi/${insp.id}/characterise`, { method: 'PUT',
+        body: JSON.stringify({ fuelType: fuel, drivetrain: drive, gearbox: gear }) })
+      setInsp({ ...insp, fuel_type: fuel, drivetrain: drive, gearbox: gear, characterised_at: new Date().toISOString() })
+      setShowChar(false)
+    } catch { setMsg({ kind: 'err', text: 'Não foi possível guardar a caracterização.' }) }
+    finally { setCharBusy(false) }
   }
 
   const criarLink = async (days: number) => {
@@ -2579,11 +2642,14 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
   useEffect(() => {
     api('/api/v1/ppi/start', { method: 'POST', body: JSON.stringify({ jobOrderId: joId, level: 'standard' }) })
       .then(async (i) => {
-        setInsp(i)
         const [tpl, full] = await Promise.all([
           api(`/api/v1/ppi/template?level=${i.level}`),
           api(`/api/v1/ppi/${i.id}`),
         ])
+        setInsp(full)
+        // Primeiro passo do workflow: se ainda não foi caracterizado e não
+        // está concluído, abre o ecrã de caracterização antes do circuito.
+        if (!full.characterised_at && full.status !== 'done') setShowChar(true)
         setTree(tpl.sections || [])
         if (tpl.sections?.[0]) setOpenSec(tpl.sections[0].id)
         const map: Record<string, any> = {}
@@ -2635,6 +2701,12 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
       {msg ? <Banner msg={msg} onClose={() => setMsg(null)} /> : <p className="hint" style={{ marginTop: 20 }}>A abrir inspecao...</p>}</main>
   )
 
+  // Passo 1 do workflow: caracterização do veículo.
+  if (showChar) return (
+    <PPICharacterise insp={insp} busy={charBusy} onBack={onBack}
+      onSave={guardarCaracterizacao} />
+  )
+
   const done = tree.reduce((n, s) => n + s.points.reduce((m: number, p: any) =>
     m + p.fields.filter((f: any) => { const a = answers[f.id]; return a && (a.state || a.number != null || a.text || a.url) }).length, 0), 0)
   const total = tree.reduce((n, s) => n + s.points.reduce((m: number, p: any) => m + p.fields.length, 0), 0)
@@ -2662,6 +2734,14 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
           </span>
         </div>
       </div>
+      {insp.characterised_at && (insp.fuel_type || insp.drivetrain) && (
+        <div className="char-summary">
+          {insp.fuel_type && <span className="char-chip">{insp.fuel_type === 'gasolina' ? 'Gasolina' : insp.fuel_type === 'diesel' ? 'Diesel' : insp.fuel_type === 'hibrido' ? 'Híbrido' : 'Elétrico'}</span>}
+          {insp.drivetrain && <span className="char-chip">{insp.drivetrain === '4x4' ? '4x4' : '2WD'}</span>}
+          {insp.gearbox && <span className="char-chip">{insp.gearbox === 'manual' ? 'Manual' : 'Automática'}</span>}
+          {insp.status !== 'done' && <button className="char-edit" onClick={() => setShowChar(true)}>Editar</button>}
+        </div>
+      )}
       <div className="ppi-progress"><div className="ppi-progress-bar" style={{ width: total ? `${Math.round(done / total * 100)}%` : '0%' }} /></div>
       <p className="hint" style={{ marginBottom: 14 }}>{done} de {total} campos preenchidos. Guarda-se sozinho a medida que preenches.</p>
 
@@ -2679,7 +2759,6 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
             {canShare && !(insp.share_token && insp.share_expires_at && new Date(insp.share_expires_at) > new Date()) && (
               <button className="btn-primary btn-sm" onClick={() => criarLink(30)} disabled={shareBusy}><i className="ti ti-link" aria-hidden="true"></i> Criar link</button>
             )}
-            <button className="btn-ghost btn-sm" onClick={abrirPdf} disabled={pdfBusy}><i className="ti ti-file-text" aria-hidden="true"></i> {pdfBusy ? 'A gerar…' : 'PDF'}</button>
           </div>
         </div>
       )}
@@ -2786,11 +2865,6 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
         </div>
       )}
 
-      <button className="btn-ghost" style={{ width: '100%', justifyContent: 'center', marginTop: 8 }}
-        disabled={pdfBusy}
-        onClick={abrirPdf}>
-        <i className="ti ti-file-text" aria-hidden="true"></i> {pdfBusy ? 'A gerar…' : 'Descarregar PDF'}
-      </button>
     </main>
   )
 }
