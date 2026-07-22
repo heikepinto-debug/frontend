@@ -2536,6 +2536,31 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
   const [openSec, setOpenSec] = useState<string | null>(null)
+  const [pdfBusy, setPdfBusy] = useState(false)
+  const [shareBusy, setShareBusy] = useState(false)
+  const canShare = useSession(s => s.can)('config:manage')   // só o dono
+
+  const criarLink = async (days: number) => {
+    setShareBusy(true)
+    try {
+      const r = await api(`/api/v1/ppi/${insp.id}/share`, { method: 'POST', body: JSON.stringify({ days }) })
+      const url = `${window.location.origin}/r/${r.token}`
+      setInsp({ ...insp, share_token: r.token, share_expires_at: r.expiresAt })
+      try { await navigator.clipboard.writeText(url); setMsg({ kind: 'ok', text: `Link copiado! Válido ${days} dias.` }) }
+      catch { setMsg({ kind: 'ok', text: url }) }
+    } catch { setMsg({ kind: 'err', text: 'Não foi possível criar o link.' }) }
+    finally { setShareBusy(false) }
+  }
+  const revogar = async () => {
+    if (!confirm('Revogar o link? Quem o tiver deixa de conseguir abrir o relatório.')) return
+    setShareBusy(true)
+    try {
+      await api(`/api/v1/ppi/${insp.id}/share`, { method: 'DELETE' })
+      setInsp({ ...insp, share_token: null, share_expires_at: null })
+      setMsg({ kind: 'ok', text: 'Link revogado.' })
+    } catch { setMsg({ kind: 'err', text: 'Não foi possível revogar.' }) }
+    finally { setShareBusy(false) }
+  }
 
   useEffect(() => {
     api('/api/v1/ppi/start', { method: 'POST', body: JSON.stringify({ jobOrderId: joId, level: 'standard' }) })
@@ -2689,7 +2714,55 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
         }}>
         {insp.status === 'done' ? 'Inspeção concluída' : 'Concluir inspeção'} <i className="ti ti-circle-check" aria-hidden="true"></i>
       </button>
-      <p className="hint" style={{ marginTop: 8, textAlign: 'center' }}>O relatorio em PDF vem no proximo pacote.</p>
+
+      {/* Partilha — só o dono. Criar, estender, reabrir, revogar. */}
+      {canShare && (
+        <div className="share-box">
+          <div className="share-head"><i className="ti ti-link" aria-hidden="true"></i> Link para o cliente</div>
+          {insp.share_token && insp.share_expires_at && new Date(insp.share_expires_at) > new Date() ? (
+            <>
+              <p className="share-status ok">Ativo · expira {new Date(insp.share_expires_at).toLocaleDateString('pt-PT')}</p>
+              <div className="share-actions">
+                <button className="btn-ghost btn-sm" onClick={() => {
+                  const url = `${window.location.origin}/r/${insp.share_token}`
+                  navigator.clipboard?.writeText(url).then(() => setMsg({ kind: 'ok', text: 'Link copiado.' })).catch(() => setMsg({ kind: 'ok', text: url }))
+                }}><i className="ti ti-copy" aria-hidden="true"></i> Copiar</button>
+                <button className="btn-ghost btn-sm" onClick={() => criarLink(30)} disabled={shareBusy}><i className="ti ti-clock-plus" aria-hidden="true"></i> Estender +30d</button>
+                <button className="btn-ghost btn-sm danger" onClick={revogar} disabled={shareBusy}><i className="ti ti-link-off" aria-hidden="true"></i> Revogar</button>
+              </div>
+            </>
+          ) : insp.share_token ? (
+            <>
+              <p className="share-status exp">Expirou {insp.share_expires_at ? new Date(insp.share_expires_at).toLocaleDateString('pt-PT') : ''}</p>
+              <div className="share-actions">
+                <button className="btn-primary btn-sm" onClick={() => criarLink(30)} disabled={shareBusy}><i className="ti ti-refresh" aria-hidden="true"></i> Reabrir por 30 dias</button>
+                <button className="btn-ghost btn-sm" onClick={() => criarLink(7)} disabled={shareBusy}>7 dias</button>
+                <button className="btn-ghost btn-sm" onClick={() => criarLink(90)} disabled={shareBusy}>90 dias</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="share-status">Ainda sem link. Cria um para enviar ao cliente.</p>
+              <div className="share-actions">
+                <button className="btn-primary btn-sm" onClick={() => criarLink(30)} disabled={shareBusy}><i className="ti ti-link" aria-hidden="true"></i> {shareBusy ? 'A criar…' : 'Criar link (30 dias)'}</button>
+                <button className="btn-ghost btn-sm" onClick={() => criarLink(7)} disabled={shareBusy}>7 dias</button>
+                <button className="btn-ghost btn-sm" onClick={() => criarLink(90)} disabled={shareBusy}>90 dias</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      <button className="btn-ghost" style={{ width: '100%', justifyContent: 'center', marginTop: 8 }}
+        disabled={pdfBusy}
+        onClick={async () => {
+          setPdfBusy(true)
+          try { const r = await api(`/api/v1/ppi/${insp.id}/pdf`); if (r.url) window.open(r.url, '_blank') }
+          catch { setMsg({ kind: 'err', text: 'Não foi possível gerar o relatório.' }) }
+          finally { setPdfBusy(false) }
+        }}>
+        <i className="ti ti-file-text" aria-hidden="true"></i> {pdfBusy ? 'A gerar…' : 'Descarregar PDF'}
+      </button>
     </main>
   )
 }
@@ -3776,20 +3849,110 @@ function Tasks({ onBack, isOwner, myId }: { onBack: () => void; isOwner: boolean
 }
 
 // ── Bootstrap ────────────────────────────────────────────────
+// ══ PÁGINA PÚBLICA do relatório PPI (sem login) ══════════════
+// Site read-only, bonito, acessível por link. Só dados seguros —
+// estado do carro e fotos, nunca dados do cliente. Marca discreta
+// da plataforma no rodapé.
+function PublicReport({ token }: { token: string }) {
+  const [data, setData] = useState<any>(null)
+  const [state, setState] = useState<'loading' | 'ok' | 'expired' | 'error'>('loading')
+
+  useEffect(() => {
+    const base = (import.meta as any).env?.VITE_API_URL || ''
+    fetch(`${base}/api/v1/public/ppi/${token}`)
+      .then(async r => {
+        if (r.status === 410) { setState('expired'); return null }
+        if (!r.ok) { setState('error'); return null }
+        return r.json()
+      })
+      .then(d => { if (d) { setData(d); setState('ok') } })
+      .catch(() => setState('error'))
+  }, [token])
+
+  const nivel = (l: string) => l === 'basic' ? 'Básico' : l === 'standard' ? 'Standard' : 'Premium'
+  const stLabel: Record<string, string> = { bom: 'Bom', aceitavel: 'Aceitável', mau: 'Mau', na: 'N.A.' }
+  const stCls: Record<string, string> = { bom: 'pr-bom', aceitavel: 'pr-acc', mau: 'pr-mau', na: 'pr-na' }
+
+  if (state === 'loading') return <div className="pr-wrap"><div className="pr-center">A carregar relatório…</div></div>
+  if (state === 'expired') return <div className="pr-wrap"><div className="pr-center"><i className="ti ti-clock-off" aria-hidden="true" style={{ fontSize: 40, color: '#9CA3AF' }}></i><h2>Este link expirou</h2><p>O relatório já não está disponível. Contacta a oficina para um novo acesso.</p></div></div>
+  if (state === 'error' || !data) return <div className="pr-wrap"><div className="pr-center"><i className="ti ti-alert-circle" aria-hidden="true" style={{ fontSize: 40, color: '#DC2626' }}></i><h2>Relatório não encontrado</h2><p>O link pode estar incorreto.</p></div></div>
+
+  const brand = data.tenant?.brand || '#1B7A3D'
+  const v = data.vehicle
+
+  return (
+    <div className="pr-wrap" style={{ ['--pr-brand' as any]: brand }}>
+      <header className="pr-header">
+        {data.tenant?.logo && <img src={data.tenant.logo} alt="" className="pr-logo" />}
+        <div className="pr-tenant">{data.tenant?.name || 'Oficina'}</div>
+        <div className="pr-sub">Relatório de Inspeção Pré-Compra</div>
+      </header>
+
+      <div className="pr-card pr-hero">
+        <div className="pr-plate">{v.plate}</div>
+        <div className="pr-veh">{v.brand} {v.model} {v.year ? `· ${v.year}` : ''}</div>
+        <div className="pr-meta">
+          <span className="pr-badge">PPI {nivel(data.level)}</span>
+          {v.km != null && <span className="pr-km">{v.km} km</span>}
+          <span className="pr-date">{data.date ? new Date(data.date).toLocaleDateString('pt-PT') : ''}</span>
+        </div>
+      </div>
+
+      {data.sections.map((sec: any, i: number) => (
+        <div key={i} className="pr-card">
+          <h3 className="pr-sec">{sec.name}</h3>
+          {sec.points.map((pt: any, j: number) => (
+            <div key={j} className="pr-point">
+              <div className="pr-point-name">{pt.name}</div>
+              <div className="pr-fields">
+                {pt.respostas.map((r: any, k: number) => (
+                  <div key={k} className="pr-field">
+                    <span className="pr-flabel">{r.label}{r.unit ? ` (${r.unit})` : ''}</span>
+                    <span className="pr-fval">
+                      {r.state && <span className={`pr-state ${stCls[r.state]}`}>{stLabel[r.state]}</span>}
+                      {r.number != null && <span>{r.number}{r.unit ? ` ${r.unit}` : ''}</span>}
+                      {r.text && <span>{r.text}</span>}
+                      {r.url && (r.type === 'file'
+                        ? <a href={r.url} target="_blank" rel="noreferrer" className="pr-link">Ver ficheiro</a>
+                        : <a href={r.url} target="_blank" rel="noreferrer"><img src={r.url} alt="" className="pr-photo" /></a>)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+
+      <div className="pr-disclaimer">
+        Este relatório reflete a condição do veículo no momento da inspeção, com base nas condições observáveis e no equipamento disponível. Não garante a deteção de defeitos ocultos nem constitui recomendação de compra.
+      </div>
+      <footer className="pr-footer">
+        Inspeção realizada por {data.tenant?.name}. Relatório gerado com <b>OficinaHub</b>.
+      </footer>
+    </div>
+  )
+}
+
 function App() {
   const token = useSession(s => s.accessToken)
   const checkTimeout = useSession(s => s.checkTimeout)
   const touch = useSession(s => s.touch)
 
+  const publicMatch = window.location.pathname.match(/^\/r\/([A-Za-z0-9_-]+)/)
+
   useEffect(() => {
-    checkTimeout()   // ao abrir a app
-    const iv = setInterval(() => checkTimeout(), 60 * 1000)   // verifica a cada minuto
+    if (publicMatch) return   // página pública não precisa de timeout de sessão
+    checkTimeout()
+    const iv = setInterval(() => checkTimeout(), 60 * 1000)
     const onActivity = () => touch()
     const events = ['click', 'keydown', 'touchstart', 'visibilitychange']
     events.forEach(e => window.addEventListener(e, onActivity))
     return () => { clearInterval(iv); events.forEach(e => window.removeEventListener(e, onActivity)) }
   }, [])
 
+  // Página pública do relatório PPI — sem autenticação. URL: /r/<token>.
+  if (publicMatch) return <PublicReport token={publicMatch[1]} />
   return token ? <Shell /> : <Login />
 }
 createRoot(document.getElementById('root')!).render(<App />)
