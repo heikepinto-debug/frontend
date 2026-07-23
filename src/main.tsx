@@ -2826,6 +2826,14 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
       onSave={guardarCaracterizacao} />
   )
 
+  // Obrigatórios por preencher — o template já vem filtrado pelo
+  // nível e pela caracterização, logo isto é exatamente o que se exige.
+  const preenchido = (f: any) => { const a = answers[f.id]; return !!(a && (a.state || a.number != null || a.text || a.url)) }
+  const faltamObrig = tree.flatMap((sec: any, si: number) =>
+    sec.points.flatMap((p: any) =>
+      p.fields.filter((f: any) => f.required && !preenchido(f))
+        .map((f: any) => ({ sec: sec.name, ponto: p.name, idx: si }))))
+
   const done = tree.reduce((n, s) => n + s.points.reduce((m: number, p: any) =>
     m + p.fields.filter((f: any) => { const a = answers[f.id]; return a && (a.state || a.number != null || a.text || a.url) }).length, 0), 0)
   const total = tree.reduce((n, s) => n + s.points.reduce((m: number, p: any) => m + p.fields.length, 0), 0)
@@ -2906,7 +2914,9 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
                   const busy = saving[f.id]
                   return (
                     <div key={f.id} className="ppi-field">
-                      <label className="ppi-field-label">{f.label}{f.unit ? ` (${f.unit})` : ''}{busy && <span className="ppi-saving">a guardar...</span>}</label>
+                      <label className="ppi-field-label">{f.label}{f.unit ? ` (${f.unit})` : ''}
+                        {f.required && <span className="ppi-req">obrigatória</span>}
+                        {busy && <span className="ppi-saving">a guardar...</span>}</label>
                       {f.hint && <div className="ppi-field-hint">{f.hint}</div>}
                       {f.field_type === 'state' && (
                         <div className="ppi-states">
@@ -3021,14 +3031,33 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
             </button>
           </div>
 
+          {faltamObrig.length > 0 && (
+            <div className="warn-box" style={{ marginTop: 12 }}>
+              <div className="warn-box-head"><i className="ti ti-alert-triangle" aria-hidden="true"></i> Faltam {faltamObrig.length === 1 ? 'uma foto obrigatória' : `${faltamObrig.length} itens obrigatórios`}</div>
+              <p>A inspeção só fecha depois destes:</p>
+              <div className="falta-list">
+                {faltamObrig.slice(0, 10).map((f: any, i: number) => (
+                  <button key={i} className="falta-item" onClick={() => { setStepIdx(f.idx); window.scrollTo(0, 0) }}>
+                    <i className="ti ti-camera" aria-hidden="true"></i> {f.ponto}
+                    <span className="falta-sec">{f.sec}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 14 }}
-            disabled={insp.status === 'done'}
+            disabled={insp.status === 'done' || faltamObrig.length > 0}
             onClick={async () => {
-              await api(`/api/v1/ppi/${insp.id}/done`, { method: 'POST' })
-              setInsp({ ...insp, status: 'done' })
-              setMsg({ kind: 'ok', text: 'Inspeção concluída. Está tudo guardado.' })
+              try {
+                await api(`/api/v1/ppi/${insp.id}/done`, { method: 'POST' })
+                setInsp({ ...insp, status: 'done' })
+                setMsg({ kind: 'ok', text: 'Inspeção concluída. Está tudo guardado.' })
+              } catch (e: any) {
+                setMsg({ kind: 'err', text: e?.message || 'Faltam itens obrigatórios para fechar a inspeção.' })
+              }
             }}>
-            {insp.status === 'done' ? 'Inspeção concluída' : 'Concluir inspeção'} <i className="ti ti-circle-check" aria-hidden="true"></i>
+            {insp.status === 'done' ? 'Inspeção concluída' : faltamObrig.length > 0 ? 'Faltam itens obrigatórios' : 'Concluir inspeção'} <i className="ti ti-circle-check" aria-hidden="true"></i>
           </button>
       {/* Partilha — só o dono. Criar, estender, reabrir, revogar. */}
       {canShare && (
@@ -4241,7 +4270,12 @@ function PublicReport({ token }: { token: string }) {
         Este relatório reflete a condição do veículo no momento da inspeção, com base nas condições observáveis e no equipamento disponível. Não garante a deteção de defeitos ocultos nem constitui recomendação de compra.
       </div>
       <footer className="pr-footer">
-        Inspeção realizada por {data.tenant?.name}. Relatório gerado com <b>OficinaHub</b>.
+        <div className="pr-by">Inspeção realizada por <b>{data.tenant?.name}</b></div>
+        <div className="pr-promo">
+          <div className="pr-promo-brand">OficinaHub</div>
+          <div className="pr-promo-txt">Este relatório foi feito com o OficinaHub — a plataforma que ajuda oficinas a inspecionar, registar e entregar trabalho com rasto de tudo.</div>
+          <div className="pr-promo-cta">Tem uma oficina? Fale connosco.</div>
+        </div>
       </footer>
     </div>
   )
