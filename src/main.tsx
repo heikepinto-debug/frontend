@@ -2574,11 +2574,14 @@ function PPICharacterise({ insp, busy, onBack, onSave }: {
 
       <div className="char-group">
         <label className="fl">Tração</label>
-        <div className="char-opts">
-          <Opt val="2wd" cur={drive} set={setDrive} label="2 rodas (2WD)" icon="ti-car" />
-          <Opt val="4x4" cur={drive} set={setDrive} label="4 rodas (4x4)" icon="ti-car" />
+        <div className="char-opts char-opts-1">
+          <Opt val="2wd" cur={drive} set={setDrive} label="2 rodas motrizes (2WD)" icon="ti-car" />
+          <Opt val="4x4_desligavel" cur={drive} set={setDrive} label="4x4 desligável (part-time)" icon="ti-car" />
+          <Opt val="4x4_permanente" cur={drive} set={setDrive} label="4x4 permanente (full-time)" icon="ti-car" />
         </div>
-        {drive === '4x4' && <p className="hint" style={{ marginTop: 6 }}>Nota: o dyno é 2WD — em 4x4, a potência avalia-se por outros meios.</p>}
+        {drive === '4x4_desligavel' && <p className="hint" style={{ marginTop: 6 }}>Dá para dyno: desengata-se a tração e testa-se como 2WD.</p>}
+        {drive === '4x4_permanente' && <p className="hint" style={{ marginTop: 6 }}>Não vai ao dyno 2WD — a potência avalia-se por outros meios.</p>}
+        {drive === '4x4' && <p className="hint" style={{ marginTop: 6 }}>Registo antigo sem detalhe — escolhe se é desligável ou permanente.</p>}
       </div>
 
       <div className="char-group">
@@ -2606,6 +2609,7 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
   const [stepIdx, setStepIdx] = useState(0)   // secção atual do workflow linear
+  const [extras, setExtras] = useState<Record<string, any[]>>({})   // fotos adicionais por campo
   const [shareBusy, setShareBusy] = useState(false)
   const [charBusy, setCharBusy] = useState(false)
   const [showChar, setShowChar] = useState(false)   // mostrar o ecrã de caracterização
@@ -2662,6 +2666,9 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
           state: a.value_state, number: a.value_number, text: a.value_text, url: a.value_url,
         }
         setAnswers(map)
+        const ex: Record<string, any[]> = {}
+        for (const at of (full.attachments || [])) if (at.field_id) (ex[at.field_id] ||= []).push({ id: at.id, url: at.url })
+        setExtras(ex)
       })
       .catch(e => setMsg({ kind: 'err', text: e?.message || 'Nao foi possivel abrir a inspecao.' }))
   }, [joId])
@@ -2687,13 +2694,29 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
       const pre = await api(`/api/v1/ppi/${insp.id}/attach/presign`, { method: 'POST',
         body: JSON.stringify({ fieldId, contentType: file.type || 'application/octet-stream' }) })
       await fetch(pre.uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file })
-      await api(`/api/v1/ppi/${insp.id}/answer`, { method: 'PUT',
-        body: JSON.stringify({ fieldId, pointId, valuePath: pre.path }) })
-      const full = await api(`/api/v1/ppi/${insp.id}`)
-      const a = (full.answers || []).find((x: any) => x.field_id === fieldId)
-      setAnswers(prev => ({ ...prev, [fieldId]: { ...prev[fieldId], url: a?.value_url } }))
+      const jaTemPrincipal = !!answers[fieldId]?.url
+      if (!jaTemPrincipal) {
+        // Primeira foto do campo: fica como principal (compatível com o que já existe).
+        await api(`/api/v1/ppi/${insp.id}/answer`, { method: 'PUT',
+          body: JSON.stringify({ fieldId, pointId, valuePath: pre.path }) })
+        const full = await api(`/api/v1/ppi/${insp.id}`)
+        const a = (full.answers || []).find((x: any) => x.field_id === fieldId)
+        setAnswers(prev => ({ ...prev, [fieldId]: { ...prev[fieldId], url: a?.value_url } }))
+      } else {
+        // Já há uma: esta entra como foto adicional do mesmo item.
+        const att = await api(`/api/v1/ppi/${insp.id}/attachments`, { method: 'POST',
+          body: JSON.stringify({ fieldId, pointId, path: pre.path }) })
+        setExtras(prev => ({ ...prev, [fieldId]: [...(prev[fieldId] || []), { id: att.id, url: att.url }] }))
+      }
     } catch { setMsg({ kind: 'err', text: 'O anexo nao subiu.' }) }
     finally { setSaving(s => ({ ...s, [fieldId]: false })) }
+  }
+
+  const removerExtra = async (fieldId: string, attId: string) => {
+    try {
+      await api(`/api/v1/ppi/${insp.id}/attachments/${attId}`, { method: 'DELETE' })
+      setExtras(prev => ({ ...prev, [fieldId]: (prev[fieldId] || []).filter((x: any) => x.id !== attId) }))
+    } catch { setMsg({ kind: 'err', text: 'Não foi possível remover a foto.' }) }
   }
 
   const STATES = [
@@ -2742,7 +2765,7 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
       {insp.characterised_at && (insp.fuel_type || insp.drivetrain) && (
         <div className="char-summary">
           {insp.fuel_type && <span className="char-chip">{insp.fuel_type === 'gasolina' ? 'Gasolina' : insp.fuel_type === 'diesel' ? 'Diesel' : insp.fuel_type === 'hibrido' ? 'Híbrido' : 'Elétrico'}</span>}
-          {insp.drivetrain && <span className="char-chip">{insp.drivetrain === '4x4' ? '4x4' : '2WD'}</span>}
+          {insp.drivetrain && <span className="char-chip">{insp.drivetrain === '2wd' ? '2WD' : insp.drivetrain === '4x4_desligavel' ? '4x4 desligável' : insp.drivetrain === '4x4_permanente' ? '4x4 permanente' : '4x4'}</span>}
           {insp.gearbox && <span className="char-chip">{insp.gearbox === 'manual' ? 'Manual' : 'Automática'}</span>}
           {insp.status !== 'done' && <button className="char-edit" onClick={() => setShowChar(true)}>Editar</button>}
         </div>
@@ -2812,12 +2835,35 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
                       )}
                       {(f.field_type === 'photo' || f.field_type === 'file') && (
                         <div className="ppi-attach">
-                          {a.url && <a href={a.url} target="_blank" rel="noreferrer" className="ppi-attach-view"><i className="ti ti-paperclip" aria-hidden="true"></i> Ver anexo</a>}
-                          <label className="btn-ghost btn-sm">
-                            <i className={`ti ${f.field_type === 'photo' ? 'ti-camera' : 'ti-file-upload'}`} aria-hidden="true"></i> {a.url ? 'Substituir' : (f.field_type === 'photo' ? 'Foto' : 'Ficheiro')}
-                            <input type="file" accept={f.field_type === 'photo' ? 'image/*' : 'application/pdf,image/*'} {...(f.field_type === 'photo' ? { capture: 'environment' } : {})} style={{ display: 'none' }}
-                              onChange={e => { const file = e.target.files?.[0]; if (file) attach(f.id, pt.id, file) }} />
-                          </label>
+                          <div className="ppi-gallery">
+                            {a.url && (
+                              <div className="ppi-thumb">
+                                <a href={a.url} target="_blank" rel="noreferrer">
+                                  {f.field_type === 'photo'
+                                    ? <img src={a.url} alt="" />
+                                    : <span className="ppi-thumb-file"><i className="ti ti-file" aria-hidden="true"></i></span>}
+                                </a>
+                              </div>
+                            )}
+                            {(extras[f.id] || []).map((ex: any) => (
+                              <div key={ex.id} className="ppi-thumb">
+                                <a href={ex.url} target="_blank" rel="noreferrer">
+                                  {f.field_type === 'photo'
+                                    ? <img src={ex.url} alt="" />
+                                    : <span className="ppi-thumb-file"><i className="ti ti-file" aria-hidden="true"></i></span>}
+                                </a>
+                                <button className="ppi-thumb-x" title="Remover" onClick={() => removerExtra(f.id, ex.id)}>
+                                  <i className="ti ti-x" aria-hidden="true"></i>
+                                </button>
+                              </div>
+                            ))}
+                            <label className="ppi-add-photo">
+                              <i className={`ti ${f.field_type === 'photo' ? 'ti-camera' : 'ti-file-upload'}`} aria-hidden="true"></i>
+                              <span>{(a.url || (extras[f.id] || []).length) ? 'Mais' : (f.field_type === 'photo' ? 'Foto' : 'Ficheiro')}</span>
+                              <input type="file" accept={f.field_type === 'photo' ? 'image/*' : 'application/pdf,image/*'} {...(f.field_type === 'photo' ? { capture: 'environment' } : {})} style={{ display: 'none' }}
+                                onChange={e => { const file = e.target.files?.[0]; if (file) attach(f.id, pt.id, file); e.target.value = '' }} />
+                            </label>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -4078,6 +4124,11 @@ function PublicReport({ token }: { token: string }) {
                       {r.url && (r.type === 'file'
                         ? <a href={r.url} target="_blank" rel="noreferrer" className="pr-link">Ver ficheiro</a>
                         : <a href={r.url} target="_blank" rel="noreferrer"><img src={r.url} alt="" className="pr-photo" /></a>)}
+                      {(r.extras || []).filter(Boolean).map((ex: string, n: number) => (
+                        r.type === 'file'
+                          ? <a key={n} href={ex} target="_blank" rel="noreferrer" className="pr-link">Ficheiro {n + 2}</a>
+                          : <a key={n} href={ex} target="_blank" rel="noreferrer"><img src={ex} alt="" className="pr-photo" /></a>
+                      ))}
                     </span>
                   </div>
                 ))}

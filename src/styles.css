@@ -915,3 +915,13 @@ textarea { resize: vertical; line-height: 1.55; }
 .ppi-hint { display: flex; gap: 8px; background: #FFFBEB; border-left: 3px solid #F59E0B; border-radius: 0 8px 8px 0; padding: 9px 12px; margin: 6px 0 10px; font-size: 12.5px; line-height: 1.5; color: #78350F; }
 .ppi-hint i { color: #D97706; font-size: 15px; flex-shrink: 0; margin-top: 1px; }
 .ppi-field-hint { font-size: 11.5px; color: var(--ink-3); margin: 2px 0 5px; line-height: 1.45; }
+.char-opts-1 { grid-template-columns: 1fr; }
+
+/* Galeria de fotos por item (várias fotos) */
+.ppi-gallery { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ppi-thumb { position: relative; width: 62px; height: 62px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); flex-shrink: 0; }
+.ppi-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ppi-thumb-file { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: var(--s2); color: var(--ink-2); font-size: 22px; }
+.ppi-thumb-x { position: absolute; top: 2px; right: 2px; width: 19px; height: 19px; border-radius: 50%; border: none; background: rgba(0,0,0,0.6); color: #fff; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
+.ppi-add-photo { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 62px; height: 62px; border: 1.5px dashed var(--brand-border); border-radius: 8px; background: var(--brand-bg); color: var(--brand-dark); font-size: 10.5px; font-weight: 600; cursor: pointer; flex-shrink: 0; }
+.ppi-add-photo i { font-size: 18px; }
