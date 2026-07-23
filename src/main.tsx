@@ -2605,7 +2605,7 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
   const [answers, setAnswers] = useState<Record<string, any>>({})
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
-  const [openSec, setOpenSec] = useState<string | null>(null)
+  const [stepIdx, setStepIdx] = useState(0)   // secção atual do workflow linear
   const [shareBusy, setShareBusy] = useState(false)
   const [charBusy, setCharBusy] = useState(false)
   const [showChar, setShowChar] = useState(false)   // mostrar o ecrã de caracterização
@@ -2656,7 +2656,7 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
         // está concluído, abre o ecrã de caracterização antes do circuito.
         if (!full.characterised_at && full.status !== 'done') setShowChar(true)
         setTree(tpl.sections || [])
-        if (tpl.sections?.[0]) setOpenSec(tpl.sections[0].id)
+        setStepIdx(0)
         const map: Record<string, any> = {}
         for (const a of (full.answers || [])) if (a.field_id) map[a.field_id] = {
           state: a.value_state, number: a.value_number, text: a.value_text, url: a.value_url,
@@ -2768,70 +2768,116 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
         </div>
       )}
 
-      {tree.map(sec => (
-        <div key={sec.id} className="ppi-section">
-          <button className="ppi-sec-head" onClick={() => setOpenSec(openSec === sec.id ? null : sec.id)}>
-            <span>{sec.name}</span>
-            <i className={`ti ti-chevron-${openSec === sec.id ? 'up' : 'down'}`} aria-hidden="true"></i>
+      {/* ── Workflow linear: uma secção por ecrã ────────────── */}
+      {stepIdx < tree.length ? (
+        <>
+          <div className="wf-step">
+            <span className="wf-step-num">Passo {stepIdx + 2}</span>
+            {tree[stepIdx]?.name}
+            <span className="wf-step-of">secção {stepIdx + 1} de {tree.length}</span>
+          </div>
+
+          <div className="wf-screen">
+            {(tree[stepIdx]?.points || []).map((pt: any) => (
+              <div key={pt.id} className="ppi-point">
+                <div className="ppi-point-name">{pt.name}</div>
+                {pt.fields.map((f: any) => {
+                  const a = answers[f.id] || {}
+                  const busy = saving[f.id]
+                  return (
+                    <div key={f.id} className="ppi-field">
+                      <label className="ppi-field-label">{f.label}{f.unit ? ` (${f.unit})` : ''}{busy && <span className="ppi-saving">a guardar...</span>}</label>
+                      {f.field_type === 'state' && (
+                        <div className="ppi-states">
+                          {STATES.map(st => (
+                            <button key={st.v} className={`ppi-state ${st.cls} ${a.state === st.v ? 'on' : ''}`}
+                              onClick={() => saveField(f.id, pt.id, { state: st.v })}>{st.label}</button>
+                          ))}
+                        </div>
+                      )}
+                      {f.field_type === 'number' && (
+                        <input type="number" inputMode="decimal" defaultValue={a.number ?? ''} placeholder={f.unit || 'valor'}
+                          onBlur={e => saveField(f.id, pt.id, { number: e.target.value })} />
+                      )}
+                      {f.field_type === 'text' && (
+                        <textarea rows={2} defaultValue={a.text ?? ''} placeholder="nota..."
+                          onBlur={e => saveField(f.id, pt.id, { text: e.target.value })} />
+                      )}
+                      {(f.field_type === 'photo' || f.field_type === 'file') && (
+                        <div className="ppi-attach">
+                          {a.url && <a href={a.url} target="_blank" rel="noreferrer" className="ppi-attach-view"><i className="ti ti-paperclip" aria-hidden="true"></i> Ver anexo</a>}
+                          <label className="btn-ghost btn-sm">
+                            <i className={`ti ${f.field_type === 'photo' ? 'ti-camera' : 'ti-file-upload'}`} aria-hidden="true"></i> {a.url ? 'Substituir' : (f.field_type === 'photo' ? 'Foto' : 'Ficheiro')}
+                            <input type="file" accept={f.field_type === 'photo' ? 'image/*' : 'application/pdf,image/*'} {...(f.field_type === 'photo' ? { capture: 'environment' } : {})} style={{ display: 'none' }}
+                              onChange={e => { const file = e.target.files?.[0]; if (file) attach(f.id, pt.id, file) }} />
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
+
+          <div className="wf-nav">
+            <button className="btn-ghost" onClick={() => stepIdx === 0 ? (insp.status === 'done' ? onBack() : setShowChar(true)) : setStepIdx(stepIdx - 1)}>
+              <i className="ti ti-arrow-left" aria-hidden="true"></i> Anterior
+            </button>
+            <button className="btn-primary" onClick={() => { setStepIdx(stepIdx + 1); window.scrollTo(0, 0) }}>
+              {stepIdx === tree.length - 1 ? 'Rever e concluir' : 'Seguinte'} <i className="ti ti-arrow-right" aria-hidden="true"></i>
+            </button>
+          </div>
+
+          {/* Saltar para outra secção já visitada */}
+          <div className="wf-jump">
+            {tree.map((s: any, i: number) => {
+              const feitos = s.points.reduce((m: number, p: any) => m + p.fields.filter((f: any) => { const a = answers[f.id]; return a && (a.state || a.number != null || a.text || a.url) }).length, 0)
+              const totalSec = s.points.reduce((m: number, p: any) => m + p.fields.length, 0)
+              return (
+                <button key={s.id} className={`wf-dot ${i === stepIdx ? 'on' : ''} ${feitos > 0 && feitos >= totalSec ? 'full' : feitos > 0 ? 'part' : ''}`}
+                  title={s.name} onClick={() => { setStepIdx(i); window.scrollTo(0, 0) }}>{i + 1}</button>
+              )
+            })}
+          </div>
+        </>
+      ) : (
+        <>
+          {/* ── Ecrã final: rever e concluir ─────────────────── */}
+          <div className="wf-step"><span className="wf-step-num">Último passo</span> Rever e concluir</div>
+
+          <div className="wf-review">
+            {tree.map((s: any, i: number) => {
+              const feitos = s.points.reduce((m: number, p: any) => m + p.fields.filter((f: any) => { const a = answers[f.id]; return a && (a.state || a.number != null || a.text || a.url) }).length, 0)
+              const totalSec = s.points.reduce((m: number, p: any) => m + p.fields.length, 0)
+              const completa = totalSec > 0 && feitos >= totalSec
+              return (
+                <button key={s.id} className="wf-review-row" onClick={() => { setStepIdx(i); window.scrollTo(0, 0) }}>
+                  <span className={`wf-review-ic ${completa ? 'full' : feitos > 0 ? 'part' : 'empty'}`}>
+                    <i className={`ti ${completa ? 'ti-check' : feitos > 0 ? 'ti-dots' : 'ti-minus'}`} aria-hidden="true"></i>
+                  </span>
+                  <span className="wf-review-name">{s.name}</span>
+                  <span className="wf-review-count">{feitos}/{totalSec}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="wf-nav" style={{ marginTop: 6 }}>
+            <button className="btn-ghost" onClick={() => { setStepIdx(tree.length - 1); window.scrollTo(0, 0) }}>
+              <i className="ti ti-arrow-left" aria-hidden="true"></i> Voltar à inspeção
+            </button>
+          </div>
+
+          <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 14 }}
+            disabled={insp.status === 'done'}
+            onClick={async () => {
+              await api(`/api/v1/ppi/${insp.id}/done`, { method: 'POST' })
+              setInsp({ ...insp, status: 'done' })
+              setMsg({ kind: 'ok', text: 'Inspeção concluída. Está tudo guardado.' })
+            }}>
+            {insp.status === 'done' ? 'Inspeção concluída' : 'Concluir inspeção'} <i className="ti ti-circle-check" aria-hidden="true"></i>
           </button>
-          {openSec === sec.id && (
-            <div className="ppi-sec-body">
-              {sec.points.map((pt: any) => (
-                <div key={pt.id} className="ppi-point">
-                  <div className="ppi-point-name">{pt.name}</div>
-                  {pt.fields.map((f: any) => {
-                    const a = answers[f.id] || {}
-                    const busy = saving[f.id]
-                    return (
-                      <div key={f.id} className="ppi-field">
-                        <label className="ppi-field-label">{f.label}{f.unit ? ` (${f.unit})` : ''}{busy && <span className="ppi-saving">a guardar...</span>}</label>
-                        {f.field_type === 'state' && (
-                          <div className="ppi-states">
-                            {STATES.map(st => (
-                              <button key={st.v} className={`ppi-state ${st.cls} ${a.state === st.v ? 'on' : ''}`}
-                                onClick={() => saveField(f.id, pt.id, { state: st.v })}>{st.label}</button>
-                            ))}
-                          </div>
-                        )}
-                        {f.field_type === 'number' && (
-                          <input type="number" inputMode="decimal" defaultValue={a.number ?? ''} placeholder={f.unit || 'valor'}
-                            onBlur={e => saveField(f.id, pt.id, { number: e.target.value })} />
-                        )}
-                        {f.field_type === 'text' && (
-                          <textarea rows={2} defaultValue={a.text ?? ''} placeholder="nota..."
-                            onBlur={e => saveField(f.id, pt.id, { text: e.target.value })} />
-                        )}
-                        {(f.field_type === 'photo' || f.field_type === 'file') && (
-                          <div className="ppi-attach">
-                            {a.url && <a href={a.url} target="_blank" rel="noreferrer" className="ppi-attach-view"><i className="ti ti-paperclip" aria-hidden="true"></i> Ver anexo</a>}
-                            <label className="btn-ghost btn-sm">
-                              <i className={`ti ${f.field_type === 'photo' ? 'ti-camera' : 'ti-file-upload'}`} aria-hidden="true"></i> {a.url ? 'Substituir' : (f.field_type === 'photo' ? 'Foto' : 'Ficheiro')}
-                              <input type="file" accept={f.field_type === 'photo' ? 'image/*' : 'application/pdf,image/*'} {...(f.field_type === 'photo' ? { capture: 'environment' } : {})} style={{ display: 'none' }}
-                                onChange={e => { const file = e.target.files?.[0]; if (file) attach(f.id, pt.id, file) }} />
-                            </label>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
-
-      <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 18 }}
-        onClick={async () => {
-          await api(`/api/v1/ppi/${insp.id}/done`, { method: 'POST' })
-          setInsp({ ...insp, status: 'done' })
-          setMsg({ kind: 'ok', text: 'Inspeção concluída. Está tudo guardado.' })
-          // Volta à lista passado um instante, para o ciclo fechar.
-          setTimeout(() => onBack(), 1200)
-        }}>
-        {insp.status === 'done' ? 'Inspeção concluída' : 'Concluir inspeção'} <i className="ti ti-circle-check" aria-hidden="true"></i>
-      </button>
-
       {/* Partilha — só o dono. Criar, estender, reabrir, revogar. */}
       {canShare && (
         <div className="share-box">
@@ -2868,6 +2914,9 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
             </>
           )}
         </div>
+      )}
+
+        </>
       )}
 
     </main>
