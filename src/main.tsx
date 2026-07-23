@@ -2611,6 +2611,16 @@ function UpdatesPopup({ updates, primeiraVez, onClose }: { updates: any[]; prime
   )
 }
 
+// Parâmetros do template: nível + caracterização (o que não se
+// aplica ao carro nem chega a aparecer no circuito).
+function paramsTemplate(insp: any) {
+  const p = new URLSearchParams()
+  p.set('level', insp.level || 'standard')
+  if (insp.fuel_type) p.set('fuel', insp.fuel_type)
+  if (insp.drivetrain) p.set('drivetrain', insp.drivetrain)
+  return p.toString()
+}
+
 function PPICharacterise({ insp, busy, onBack, onSave }: {
   insp: any; busy: boolean; onBack: () => void
   onSave: (fuel: string | null, drive: string | null, gear: string | null) => void
@@ -2694,7 +2704,14 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
     try {
       await api(`/api/v1/ppi/${insp.id}/characterise`, { method: 'PUT',
         body: JSON.stringify({ fuelType: fuel, drivetrain: drive, gearbox: gear }) })
-      setInsp({ ...insp, fuel_type: fuel, drivetrain: drive, gearbox: gear, characterised_at: new Date().toISOString() })
+      const atualizado = { ...insp, fuel_type: fuel, drivetrain: drive, gearbox: gear, characterised_at: new Date().toISOString() }
+      setInsp(atualizado)
+      // A caracterização muda o que se aplica: recarregar o circuito.
+      try {
+        const tpl = await api(`/api/v1/ppi/template?${paramsTemplate(atualizado)}`)
+        setTree(tpl.sections || [])
+        setStepIdx(0)
+      } catch { /* mantém o circuito atual se falhar */ }
       setShowChar(false)
     } catch { setMsg({ kind: 'err', text: 'Não foi possível guardar a caracterização.' }) }
     finally { setCharBusy(false) }
@@ -2725,10 +2742,10 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
   useEffect(() => {
     api('/api/v1/ppi/start', { method: 'POST', body: JSON.stringify({ jobOrderId: joId, level: 'standard' }) })
       .then(async (i) => {
-        const [tpl, full] = await Promise.all([
-          api(`/api/v1/ppi/template?level=${i.level}`),
-          api(`/api/v1/ppi/${i.id}`),
-        ])
+        // A inspeção primeiro: é dela que vem a caracterização, e é a
+        // caracterização que decide o que o template mostra.
+        const full = await api(`/api/v1/ppi/${i.id}`)
+        const tpl = await api(`/api/v1/ppi/template?${paramsTemplate(full)}`)
         setInsp(full)
         // Primeiro passo do workflow: se ainda não foi caracterizado e não
         // está concluído, abre o ecrã de caracterização antes do circuito.
@@ -2972,6 +2989,14 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
         <>
           {/* ── Ecrã final: rever e concluir ─────────────────── */}
           <div className="wf-step"><span className="wf-step-num">Último passo</span> Rever e concluir</div>
+          {(insp.fuel_type || insp.drivetrain) && (
+            <p className="hint" style={{ marginTop: -8, marginBottom: 12 }}>
+              O circuito mostra só o que se aplica a este carro
+              {insp.drivetrain === '2wd' ? ' (2WD — a secção de tração 4x4 não aparece)'
+                : insp.drivetrain === '4x4_permanente' ? ' (4x4 permanente — o dinamómetro não aparece)'
+                : insp.fuel_type === 'eletrico' ? ' (elétrico — os pontos de combustão não aparecem)' : ''}.
+            </p>
+          )}
 
           <div className="wf-review">
             {tree.map((s: any, i: number) => {
