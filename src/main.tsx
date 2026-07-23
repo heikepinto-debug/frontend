@@ -2781,12 +2781,19 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
             {(tree[stepIdx]?.points || []).map((pt: any) => (
               <div key={pt.id} className="ppi-point">
                 <div className="ppi-point-name">{pt.name}</div>
+                {pt.hint && (
+                  <div className="ppi-hint">
+                    <i className="ti ti-bulb" aria-hidden="true"></i>
+                    <span>{pt.hint}</span>
+                  </div>
+                )}
                 {pt.fields.map((f: any) => {
                   const a = answers[f.id] || {}
                   const busy = saving[f.id]
                   return (
                     <div key={f.id} className="ppi-field">
                       <label className="ppi-field-label">{f.label}{f.unit ? ` (${f.unit})` : ''}{busy && <span className="ppi-saving">a guardar...</span>}</label>
+                      {f.hint && <div className="ppi-field-hint">{f.hint}</div>}
                       {f.field_type === 'state' && (
                         <div className="ppi-states">
                           {STATES.map(st => (
