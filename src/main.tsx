@@ -315,7 +315,7 @@ function Shell() {
           </div>
         </main>
       )}
-      {view === 'reception' && <Reception key={resumeDraftId || 'new'} resumeDraftId={resumeDraftId} onDone={() => { setResumeDraftId(undefined); setView('list') }} onBack={() => { setResumeDraftId(undefined); setView('home') }} />}
+      {view === 'reception' && <Reception key={resumeDraftId || 'new'} resumeDraftId={resumeDraftId} onDone={() => { setResumeDraftId(undefined); setView('list') }} onBack={() => { setResumeDraftId(undefined); setView('home') }} onStartPPI={(joId: string) => { setResumeDraftId(undefined); setPpiJoId(joId); setPpiReturnTo('list'); setView('ppi') }} />}
       {view === 'ppi' && ppiJoId && <PPICircuit joId={ppiJoId} onBack={() => setView(ppiReturnTo)} />}
       {view === 'ppi-list' && <PPIList onBack={() => setView('home')} onOpen={(joId: string) => { setPpiJoId(joId); setPpiReturnTo('ppi-list'); setView('ppi') }} />}
       {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
@@ -458,7 +458,7 @@ const V = {
 }
 
 
-function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBack: () => void; resumeDraftId?: string }) {
+function Reception({ onDone, onBack, resumeDraftId, onStartPPI }: { onDone: () => void; onBack: () => void; resumeDraftId?: string; onStartPPI?: (joId: string) => void }) {
   const tenant = useSession(s => s.tenant)
   const [step, setStep] = useState(0)
   // O modo de entrada decide-se DEPOIS dos serviços (não à partida):
@@ -546,7 +546,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)  // barra de envio
   const [compsize, setCompsize] = useState<{ before: number; after: number } | null>(null)  // diagnóstico de compressão
-  const [result, setResult] = useState<{ number: string; offline: boolean; joId?: string; draft?: boolean } | null>(null)
+  const [result, setResult] = useState<{ number: string; offline: boolean; joId?: string; draft?: boolean; hasPpi?: boolean } | null>(null)
 
   const fileRef = useRef<HTMLInputElement>(null)
   const pendingZone = useRef<string>('')
@@ -862,7 +862,7 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
         }),
       })
       setProgress(null)
-      setResult({ number: jo.number, offline: false, joId: jo.id })
+      setResult({ number: jo.number, offline: false, joId: jo.id, hasPpi: chosenServices.some(x => /ppi/i.test(x.typeName)) })
     } catch (e: any) {
       // A fila offline só serve para o que NUNCA chegou ao servidor. Se a JO
       // já foi criada, enfileirá-la outra vez criaria uma segunda entrada do
@@ -935,8 +935,13 @@ function Reception({ onDone, onBack, resumeDraftId }: { onDone: () => void; onBa
           ? 'Recepção guardada no tablet. Sincroniza automaticamente quando houver internet.'
           : 'Ordem de trabalho criada, fotos carregadas e documento assinado arquivado.'}</p>
         <div className="success-actions">
+          {!result.offline && !result.draft && result.joId && result.hasPpi && onStartPPI && (
+            <button className="btn-primary" style={{ justifyContent: 'center' }} onClick={() => result.joId && onStartPPI(result.joId)}>
+              <i className="ti ti-clipboard-list" aria-hidden="true"></i> Iniciar inspeção PPI
+            </button>
+          )}
           {!result.offline && !result.draft && result.joId && (
-            <button className="btn-primary" style={{ justifyContent: 'center' }}
+            <button className={result.hasPpi ? 'btn-ghost' : 'btn-primary'} style={{ justifyContent: 'center' }}
               onClick={async () => {
                 try { const r = await api(`/api/v1/receptions/${result.joId}/pdf`); if (r.url) window.open(r.url, '_blank') }
                 catch { alert('Não foi possível abrir o PDF agora.') }
