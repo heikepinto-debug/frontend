@@ -925,3 +925,24 @@ textarea { resize: vertical; line-height: 1.55; }
 .ppi-thumb-x { position: absolute; top: 2px; right: 2px; width: 19px; height: 19px; border-radius: 50%; border: none; background: rgba(0,0,0,0.6); color: #fff; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
 .ppi-add-photo { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 62px; height: 62px; border: 1.5px dashed var(--brand-border); border-radius: 8px; background: var(--brand-bg); color: var(--brand-dark); font-size: 10.5px; font-weight: 600; cursor: pointer; flex-shrink: 0; }
 .ppi-add-photo i { font-size: 18px; }
+
+/* ── Novidades: página ──────────────────────────────────────── */
+.upd-card { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--s1); padding: 14px 16px; margin-bottom: 10px; }
+.upd-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.upd-title { font-size: 15px; font-weight: 700; color: var(--ink); }
+.upd-meta { font-size: 12px; color: var(--ink-3); font-weight: 600; }
+.upd-items { margin: 0; padding-left: 18px; }
+.upd-items li { font-size: 13.5px; color: var(--ink-2); line-height: 1.55; margin-bottom: 3px; }
+/* ── Novidades: popup ───────────────────────────────────────── */
+.upd-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; padding: 18px; z-index: 900; }
+.upd-modal { background: var(--s1); border-radius: 16px; max-width: 460px; width: 100%; max-height: 82vh; display: flex; flex-direction: column; padding: 20px; box-shadow: 0 12px 40px rgba(0,0,0,0.25); }
+.upd-modal-head { display: flex; align-items: center; gap: 8px; }
+.upd-modal-head i { color: var(--brand); font-size: 20px; }
+.upd-modal-head h3 { margin: 0; font-size: 17px; color: var(--ink); }
+.upd-modal-sub { font-size: 12.5px; color: var(--ink-3); margin: 4px 0 12px; }
+.upd-modal-body { overflow-y: auto; flex: 1; margin-bottom: 14px; }
+.upd-modal-item { padding: 10px 0; border-top: 1px solid var(--line); }
+.upd-modal-item:first-child { border-top: none; padding-top: 0; }
+.upd-modal-title { font-size: 14px; font-weight: 700; color: var(--brand-dark); margin-bottom: 4px; }
+.upd-modal-item ul { margin: 0; padding-left: 18px; }
+.upd-modal-item li { font-size: 13px; color: var(--ink-2); line-height: 1.5; margin-bottom: 2px; }

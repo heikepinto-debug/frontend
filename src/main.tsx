@@ -97,10 +97,12 @@ function Login() {
 function Shell() {
   const { tenant, user, logout } = useSession()
   const canDo = useSession(s => s.can)
+  const [novidades, setNovidades] = useState<any[] | null>(null)
+  const [novPrimeira, setNovPrimeira] = useState(false)
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
   const [temUpdate, setTemUpdate] = useState(false)   // há versão nova à espera
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
@@ -143,6 +145,13 @@ function Shell() {
   }, [temUpdate, view])
 
   // Contadores e resumo do painel — actualiza ao voltar ao início
+  // Novidades por ver desde a última visita → popup.
+  useEffect(() => {
+    api('/api/v1/updates/unseen')
+      .then(r => { if ((r.updates || []).length) { setNovidades(r.updates); setNovPrimeira(!!r.primeiraVez) } })
+      .catch(() => {})
+  }, [])
+
   useEffect(() => {
     if (view === 'home') {
       api('/api/v1/bookings').then(r => {
@@ -167,6 +176,7 @@ function Shell() {
     canDo('reception:create') && nav('bookings', 'Marcações', 'ti-calendar-event', bookingCount || undefined, bookingCount > 0),
     nav('tasks', 'Tarefas', 'ti-checklist'),
     canDo('config:manage') && nav('servicetypes', 'Tipos de serviço', 'ti-tool'),
+    nav('updates', 'Novidades', 'ti-bell'),
   ].filter(Boolean) as any[]
 
   const go = (v: string) => { setView(v as any); setNavOpen(false) }
@@ -317,6 +327,11 @@ function Shell() {
       )}
       {view === 'reception' && <Reception key={resumeDraftId || 'new'} resumeDraftId={resumeDraftId} onDone={() => { setResumeDraftId(undefined); setView('list') }} onBack={() => { setResumeDraftId(undefined); setView('home') }} onStartPPI={(joId: string) => { setResumeDraftId(undefined); setPpiJoId(joId); setPpiReturnTo('list'); setView('ppi') }} />}
       {view === 'ppi' && ppiJoId && <PPICircuit joId={ppiJoId} onBack={() => setView(ppiReturnTo)} />}
+      {novidades && novidades.length > 0 && (
+        <UpdatesPopup updates={novidades} primeiraVez={novPrimeira}
+          onClose={() => { setNovidades(null); api('/api/v1/updates/seen', { method: 'POST' }).catch(() => {}) }} />
+      )}
+      {view === 'updates' && <UpdatesPage onBack={() => setView('home')} />}
       {view === 'ppi-list' && <PPIList onBack={() => setView('home')} onOpen={(joId: string) => { setPpiJoId(joId); setPpiReturnTo('ppi-list'); setView('ppi') }} />}
       {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
         onOpenPPI={(id: string) => { setPpiJoId(id); setPpiReturnTo('list'); setView('ppi') }}
@@ -1836,7 +1851,7 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
               {!isDraft && r.signed_at && r.has_ppi && onOpenPPI && (
                 r.ppi_status === 'done'
                   ? <button className="btn-ghost btn-sm" onClick={() => onOpenPPI(r.id)} title="Ver inspeção PPI concluída"><i className="ti ti-clipboard-check" aria-hidden="true"></i> PPI concluído</button>
-                  : <button className="btn-primary btn-sm" onClick={() => onOpenPPI(r.id)} title="Abrir inspeção PPI"><i className="ti ti-clipboard-search" aria-hidden="true"></i> {r.ppi_id ? 'Continuar PPI' : 'Abrir PPI'}</button>
+                  : <button className="btn-primary btn-sm" onClick={() => onOpenPPI(r.id)} title="Abrir inspeção PPI"><i className="ti ti-clipboard-list" aria-hidden="true"></i> {r.ppi_id ? 'Continuar PPI' : 'Abrir PPI'}</button>
               )}
               {!isDraft && r.signed_at && r.status !== 'delivered' && onOpenOS && !incompleta && !r.has_ppi && (
                 r.os_opened_at
@@ -2510,7 +2525,7 @@ function PPIList({ onBack, onOpen }: { onBack: () => void; onOpen: (joId: string
       {err && <div className="pending-box"><p style={{ color: 'var(--danger)' }}>{err}</p></div>}
       {!loading && !err && rows.length === 0 && (
         <div className="empty-state" style={{ marginTop: 30 }}>
-          <i className="ti ti-clipboard-search" aria-hidden="true" style={{ fontSize: 32, color: 'var(--ink-3)' }}></i>
+          <i className="ti ti-clipboard-list" aria-hidden="true" style={{ fontSize: 32, color: 'var(--ink-3)' }}></i>
           <p className="hint">Ainda não há inspeções {filtro === 'done' ? 'concluídas' : filtro === 'in_progress' ? 'em curso' : ''}.</p>
         </div>
       )}
@@ -2537,6 +2552,65 @@ function PPIList({ onBack, onOpen }: { onBack: () => void; onOpen: (joId: string
 // ── Passo 1 do workflow PPI: caracterização do veículo ───────
 // Condiciona o resto do circuito (nos pacotes seguintes). Um ecrã,
 // guiado, otimizado para telemóvel — o padrão do novo workflow.
+// ── Novidades: página completa ───────────────────────────────
+function UpdatesPage({ onBack }: { onBack: () => void }) {
+  const [rows, setRows] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    api('/api/v1/updates').then(r => setRows(r.updates || [])).catch(() => {}).finally(() => setLoading(false))
+  }, [])
+  const data = (s: string) => { try { return new Date(s).toLocaleDateString('pt-PT', { day: '2-digit', month: 'long', year: 'numeric' }) } catch { return '' } }
+  return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 14 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Voltar</button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Novidades</h2><span />
+      </div>
+      {loading && <p className="hint">A carregar…</p>}
+      {!loading && rows.length === 0 && <p className="hint">Ainda não há novidades registadas.</p>}
+      {rows.map((u, i) => (
+        <div key={i} className="upd-card">
+          <div className="upd-head">
+            <span className="upd-title">{u.title}</span>
+            <span className="upd-meta">{u.version} · {data(u.released_at)}</span>
+          </div>
+          <ul className="upd-items">
+            {(u.items || []).map((it: string, j: number) => <li key={j}>{it}</li>)}
+          </ul>
+        </div>
+      ))}
+    </main>
+  )
+}
+
+// ── Novidades: popup do que mudou desde a última visita ──────
+function UpdatesPopup({ updates, primeiraVez, onClose }: { updates: any[]; primeiraVez: boolean; onClose: () => void }) {
+  return (
+    <div className="upd-overlay" onClick={onClose}>
+      <div className="upd-modal" onClick={e => e.stopPropagation()}>
+        <div className="upd-modal-head">
+          <i className="ti ti-sparkles" aria-hidden="true"></i>
+          <h3>{primeiraVez ? 'O que há de novo' : `Novidades desde a tua última visita`}</h3>
+        </div>
+        <p className="upd-modal-sub">
+          {updates.length === 1 ? '1 atualização' : `${updates.length} atualizações`} — em resumo:
+        </p>
+        <div className="upd-modal-body">
+          {updates.map((u, i) => (
+            <div key={i} className="upd-modal-item">
+              <div className="upd-modal-title">{u.title}</div>
+              <ul>{(u.items || []).slice(0, 3).map((it: string, j: number) => <li key={j}>{it}</li>)}</ul>
+            </div>
+          ))}
+        </div>
+        <button className="btn-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={onClose}>
+          Percebi
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function PPICharacterise({ insp, busy, onBack, onSave }: {
   insp: any; busy: boolean; onBack: () => void
   onSave: (fuel: string | null, drive: string | null, gear: string | null) => void
@@ -2567,8 +2641,8 @@ function PPICharacterise({ insp, busy, onBack, onSave }: {
         <div className="char-opts">
           <Opt val="gasolina" cur={fuel} set={setFuel} label="Gasolina" icon="ti-gas-station" />
           <Opt val="diesel" cur={fuel} set={setFuel} label="Diesel" icon="ti-gas-station" />
-          <Opt val="hibrido" cur={fuel} set={setFuel} label="Híbrido" />
-          <Opt val="eletrico" cur={fuel} set={setFuel} label="Elétrico" />
+          <Opt val="hibrido" cur={fuel} set={setFuel} label="Híbrido" icon="ti-battery-charging" />
+          <Opt val="eletrico" cur={fuel} set={setFuel} label="Elétrico" icon="ti-bolt" />
         </div>
       </div>
 
@@ -2576,8 +2650,8 @@ function PPICharacterise({ insp, busy, onBack, onSave }: {
         <label className="fl">Tração</label>
         <div className="char-opts char-opts-1">
           <Opt val="2wd" cur={drive} set={setDrive} label="2 rodas motrizes (2WD)" icon="ti-car" />
-          <Opt val="4x4_desligavel" cur={drive} set={setDrive} label="4x4 desligável (part-time)" icon="ti-car" />
-          <Opt val="4x4_permanente" cur={drive} set={setDrive} label="4x4 permanente (full-time)" icon="ti-car" />
+          <Opt val="4x4_desligavel" cur={drive} set={setDrive} label="4x4 desligável (part-time)" icon="ti-car-4wd" />
+          <Opt val="4x4_permanente" cur={drive} set={setDrive} label="4x4 permanente (full-time)" icon="ti-car-4wd" />
         </div>
         {drive === '4x4_desligavel' && <p className="hint" style={{ marginTop: 6 }}>Dá para dyno: desengata-se a tração e testa-se como 2WD.</p>}
         {drive === '4x4_permanente' && <p className="hint" style={{ marginTop: 6 }}>Não vai ao dyno 2WD — a potência avalia-se por outros meios.</p>}
@@ -2858,7 +2932,7 @@ function PPICircuit({ joId, onBack }: { joId: string; onBack: () => void }) {
                               </div>
                             ))}
                             <label className="ppi-add-photo">
-                              <i className={`ti ${f.field_type === 'photo' ? 'ti-camera' : 'ti-file-upload'}`} aria-hidden="true"></i>
+                              <i className={`ti ${f.field_type === 'photo' ? 'ti-camera-plus' : 'ti-file-upload'}`} aria-hidden="true"></i>
                               <span>{(a.url || (extras[f.id] || []).length) ? 'Mais' : (f.field_type === 'photo' ? 'Foto' : 'Ficheiro')}</span>
                               <input type="file" accept={f.field_type === 'photo' ? 'image/*' : 'application/pdf,image/*'} {...(f.field_type === 'photo' ? { capture: 'environment' } : {})} style={{ display: 'none' }}
                                 onChange={e => { const file = e.target.files?.[0]; if (file) attach(f.id, pt.id, file); e.target.value = '' }} />
