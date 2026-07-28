@@ -960,3 +960,59 @@ textarea { resize: vertical; line-height: 1.55; }
 .pr-promo-brand { font-size: 17px; font-weight: 800; color: #4F46E5; letter-spacing: -0.3px; }
 .pr-promo-txt { font-size: 12.5px; color: #6B7280; line-height: 1.55; margin: 6px 0 8px; }
 .pr-promo-cta { font-size: 12.5px; font-weight: 700; color: #4F46E5; }
+
+/* ── Gestão do modelo de PPI ─────────────────────────────────── */
+.mdl-sec { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--s1); margin-bottom: 8px; overflow: hidden; }
+.mdl-sec.off { opacity: 0.55; }
+.mdl-sec-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 13px 15px; background: none; border: none; cursor: pointer; text-align: left; }
+.mdl-sec-name { font-size: 15px; font-weight: 700; color: var(--ink); flex: 1; }
+.mdl-badge { font-size: 10.5px; font-weight: 700; color: var(--brand-dark); background: var(--brand-bg); padding: 2px 8px; border-radius: 9px; }
+.mdl-off { font-size: 10.5px; font-weight: 700; color: var(--danger); background: #FEE2E2; padding: 2px 8px; border-radius: 9px; }
+.mdl-count { font-size: 12px; color: var(--ink-3); font-weight: 600; }
+.mdl-sec-body { padding: 0 15px 14px; }
+.mdl-actions { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.mdl-pt { border-top: 1px solid var(--line); padding: 11px 0; }
+.mdl-pt.off { opacity: 0.5; }
+.mdl-pt-head { display: flex; align-items: center; gap: 7px; }
+.mdl-pt-name { font-size: 14px; font-weight: 600; color: var(--ink); flex: 1; }
+.mdl-edit { background: none; border: none; color: var(--ink-3); cursor: pointer; font-size: 15px; padding: 2px 4px; }
+.mdl-edit:hover { color: var(--brand); }
+.mdl-aplica { font-size: 11px; color: #B45309; background: #FEF3C7; display: inline-block; padding: 1px 8px; border-radius: 8px; margin-top: 4px; }
+.mdl-hint { font-size: 12px; color: var(--ink-3); line-height: 1.45; margin-top: 5px; font-style: italic; }
+.mdl-fields { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.mdl-fld { display: flex; align-items: center; gap: 5px; font-size: 12px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--s2); color: var(--ink-2); cursor: pointer; }
+.mdl-fld.off { opacity: 0.5; text-decoration: line-through; }
+.mdl-fld.add { border-style: dashed; color: var(--brand-dark); background: var(--brand-bg); border-color: var(--brand-border); }
+.mdl-fld-t { font-size: 10px; color: var(--ink-3); }
+.mdl-fld-r { font-size: 9.5px; font-weight: 700; color: #B45309; background: #FEF3C7; padding: 1px 5px; border-radius: 6px; }
+.mdl-form { border: 1.5px solid var(--brand-border); border-radius: var(--radius-sm); background: var(--brand-bg); padding: 14px; margin: 10px 0; }
+.mdl-form-head { font-size: 13px; font-weight: 700; color: var(--brand-dark); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.3px; }
+.mdl-f { margin-bottom: 10px; }
+.mdl-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.mdl-chip { font-size: 12px; padding: 5px 11px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--s1); color: var(--ink-2); font-weight: 600; cursor: pointer; }
+.mdl-chip.on { border-color: var(--brand); background: var(--brand); color: #fff; }
+
+/* ── Estado por serviço na OS ────────────────────────────────── */
+.svc-list { display: flex; flex-direction: column; gap: 8px; }
+.svc-row { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--s1); padding: 12px 14px; }
+.svc-main { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.svc-name { font-size: 14.5px; font-weight: 700; color: var(--ink); }
+.svc-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; padding: 5px 11px; border-radius: 20px; border: 1.5px solid; cursor: pointer; background: var(--s1); }
+.svc-state.idle { color: var(--ink-3); border-color: var(--line); }
+.svc-state.go { color: #1D4ED8; border-color: #BFDBFE; background: #EFF6FF; }
+.svc-state.wait { color: #B45309; border-color: #FDE68A; background: #FFFBEB; }
+.svc-state.ok { color: #15803D; border-color: #86EFAC; background: #DCFCE7; }
+.svc-state.no { color: #DC2626; border-color: #FECACA; background: #FEF2F2; }
+.svc-note { font-size: 12.5px; color: var(--ink-2); margin-top: 6px; background: var(--s2); padding: 6px 10px; border-radius: 8px; }
+.svc-assigned { font-size: 11.5px; color: var(--ink-3); margin-top: 4px; }
+.svc-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+.svc-opt { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; padding: 9px 11px; border: 1.5px solid var(--line); border-radius: 9px; background: var(--s1); color: var(--ink-2); cursor: pointer; text-align: left; }
+.svc-opt.on { border-color: var(--brand); background: var(--brand-bg); color: var(--brand-dark); }
+.svc-motivo { margin-top: 10px; padding: 10px; background: var(--brand-bg); border-radius: 9px; }
+.svc-hist-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--ink-3); background: none; border: none; cursor: pointer; margin-top: 8px; padding: 2px 0; }
+.svc-hist { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 7px; }
+.svc-hist-empty { font-size: 12px; color: var(--ink-3); }
+.svc-hist-row { display: flex; flex-direction: column; gap: 1px; }
+.svc-hist-arrow { font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.svc-hist-meta { font-size: 11px; color: var(--ink-3); }
+.svc-hist-reason { font-size: 11.5px; color: var(--ink-2); font-style: italic; }

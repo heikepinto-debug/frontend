@@ -102,7 +102,7 @@ function Shell() {
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
   const [temUpdate, setTemUpdate] = useState(false)   // há versão nova à espera
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates' | 'ppi-model'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
@@ -176,6 +176,7 @@ function Shell() {
     canDo('reception:create') && nav('bookings', 'Marcações', 'ti-calendar-event', bookingCount || undefined, bookingCount > 0),
     nav('tasks', 'Tarefas', 'ti-checklist'),
     canDo('config:manage') && nav('servicetypes', 'Tipos de serviço', 'ti-tool'),
+    canDo('config:manage') && nav('ppi-model', 'Modelo de inspeção', 'ti-adjustments'),
     nav('updates', 'Novidades', 'ti-bell'),
   ].filter(Boolean) as any[]
 
@@ -332,6 +333,7 @@ function Shell() {
           onClose={() => { setNovidades(null); api('/api/v1/updates/seen', { method: 'POST' }).catch(() => {}) }} />
       )}
       {view === 'updates' && <UpdatesPage onBack={() => setView('home')} />}
+      {view === 'ppi-model' && <PPIModel onBack={() => setView('home')} />}
       {view === 'ppi-list' && <PPIList onBack={() => setView('home')} onOpen={(joId: string) => { setPpiJoId(joId); setPpiReturnTo('ppi-list'); setView('ppi') }} />}
       {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
         onOpenPPI={(id: string) => { setPpiJoId(id); setPpiReturnTo('list'); setView('ppi') }}
@@ -2621,6 +2623,230 @@ function paramsTemplate(insp: any) {
   return p.toString()
 }
 
+// ── Gestão do modelo de PPI (secções → pontos → campos) ──────
+// Só o dono. Permite editar tudo sem migrations: nomes, dicas,
+// níveis, obrigatórios e a que carros cada ponto se aplica.
+// Nada se apaga — desativa-se, para não órfãos nas inspeções.
+const NIVEIS_LBL: any = { basic: 'Básico', standard: 'Standard', premium: 'Premium' }
+const TIPOS_LBL: any = { state: 'Estado', number: 'Número', text: 'Texto', photo: 'Foto', file: 'Ficheiro' }
+const FUEL_OPS = [['gasolina', 'Gasolina'], ['diesel', 'Diesel'], ['hibrido', 'Híbrido'], ['eletrico', 'Elétrico']]
+const DRIVE_OPS = [['2wd', '2WD'], ['4x4_desligavel', '4x4 desligável'], ['4x4_permanente', '4x4 permanente']]
+
+function PPIModel({ onBack }: { onBack: () => void }) {
+  const [tree, setTree] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
+  const [aberta, setAberta] = useState<string | null>(null)
+  const [edit, setEdit] = useState<any>(null)   // { tipo, id?, dados }
+  const [busy, setBusy] = useState(false)
+
+  const carregar = () => {
+    setLoading(true)
+    api('/api/v1/ppi/model')
+      .then(r => setTree(r.sections || []))
+      .catch(e => setMsg({ kind: 'err', text: e?.message || 'Não foi possível carregar o modelo.' }))
+      .finally(() => setLoading(false))
+  }
+  useEffect(carregar, [])
+
+  const gravar = async () => {
+    if (!edit) return
+    setBusy(true)
+    const { tipo, id, dados } = edit
+    try {
+      const base = '/api/v1/ppi/model'
+      if (tipo === 'section') {
+        if (id) await api(`${base}/section/${id}`, { method: 'PATCH', body: JSON.stringify(dados) })
+        else await api(`${base}/section`, { method: 'POST', body: JSON.stringify(dados) })
+      } else if (tipo === 'point') {
+        if (id) await api(`${base}/point/${id}`, { method: 'PATCH', body: JSON.stringify(dados) })
+        else await api(`${base}/point`, { method: 'POST', body: JSON.stringify(dados) })
+      } else {
+        if (id) await api(`${base}/field/${id}`, { method: 'PATCH', body: JSON.stringify(dados) })
+        else await api(`${base}/field`, { method: 'POST', body: JSON.stringify(dados) })
+      }
+      setEdit(null); carregar()
+      setMsg({ kind: 'ok', text: 'Guardado.' })
+    } catch (e: any) { setMsg({ kind: 'err', text: e?.message || 'Não foi possível guardar.' }) }
+    finally { setBusy(false) }
+  }
+
+  const campo = (label: string, node: any) => (
+    <div className="mdl-f"><label className="fl">{label}</label>{node}</div>
+  )
+
+  const formEdit = () => {
+    if (!edit) return null
+    const d = edit.dados
+    const set = (k: string, v: any) => setEdit({ ...edit, dados: { ...d, [k]: v } })
+    const toggleLista = (k: string, val: string) => {
+      const atual: string[] = d[k] || []
+      set(k, atual.includes(val) ? atual.filter(x => x !== val) : [...atual, val])
+    }
+    return (
+      <div className="mdl-form">
+        <div className="mdl-form-head">
+          {edit.id ? 'Editar' : 'Novo'} {edit.tipo === 'section' ? 'secção' : edit.tipo === 'point' ? 'ponto' : 'campo'}
+        </div>
+
+        {edit.tipo === 'field'
+          ? campo('Nome do campo', <input value={d.label || ''} onChange={e => set('label', e.target.value)} placeholder="ex: Profundidade do piso" />)
+          : campo('Nome', <input value={d.name || ''} onChange={e => set('name', e.target.value)} placeholder={edit.tipo === 'section' ? 'ex: Travões' : 'ex: Travão de mão'} />)}
+
+        {edit.tipo === 'field' && (
+          <>
+            {campo('Tipo', (
+              <div className="seg-row">
+                {Object.keys(TIPOS_LBL).map(t => (
+                  <button key={t} className={`seg ${d.fieldType === t ? 'on' : ''}`} onClick={() => set('fieldType', t)}>{TIPOS_LBL[t]}</button>
+                ))}
+              </div>
+            ))}
+            {d.fieldType === 'number' && campo('Unidade', <input value={d.unit || ''} onChange={e => set('unit', e.target.value)} placeholder="mm, V, bar, cv" />)}
+            <button className={`chk ${d.required ? 'on' : ''}`} style={{ width: '100%', justifyContent: 'flex-start', marginTop: 8 }}
+              onClick={() => set('required', !d.required)}>
+              <span className="chk-box">{d.required && <i className="ti ti-check" aria-hidden="true"></i>}</span>
+              Obrigatório — a inspeção não fecha sem isto
+            </button>
+          </>
+        )}
+
+        {edit.tipo !== 'field' && campo('A partir de que nível aparece', (
+          <div className="seg-row">
+            {Object.keys(NIVEIS_LBL).map(n => (
+              <button key={n} className={`seg ${d.minLevel === n ? 'on' : ''}`} onClick={() => set('minLevel', n)}>{NIVEIS_LBL[n]}</button>
+            ))}
+          </div>
+        ))}
+
+        {edit.tipo === 'point' && (
+          <>
+            {campo('Dica de inspeção (como e onde testar)', (
+              <textarea rows={4} value={d.hint || ''} onChange={e => set('hint', e.target.value)}
+                placeholder="ex: Mede nas portas, capô e tejadilho, e sobretudo nas junções com os para-choques..." />
+            ))}
+            {campo('Só se aplica a estes combustíveis', (
+              <div className="mdl-chips">
+                {FUEL_OPS.map(([v, l]) => (
+                  <button key={v} className={`mdl-chip ${(d.appliesFuel || []).includes(v) ? 'on' : ''}`} onClick={() => toggleLista('appliesFuel', v)}>{l}</button>
+                ))}
+              </div>
+            ))}
+            {campo('Só se aplica a estas trações', (
+              <div className="mdl-chips">
+                {DRIVE_OPS.map(([v, l]) => (
+                  <button key={v} className={`mdl-chip ${(d.appliesDrivetrain || []).includes(v) ? 'on' : ''}`} onClick={() => toggleLista('appliesDrivetrain', v)}>{l}</button>
+                ))}
+              </div>
+            ))}
+            <p className="hint">Nada escolhido = aplica-se a todos os carros.</p>
+          </>
+        )}
+
+        {campo('Ordem', <input type="number" value={d.sortOrder ?? 0} onChange={e => set('sortOrder', parseInt(e.target.value || '0', 10))} />)}
+
+        {edit.id && (
+          <button className={`chk ${d.active === false ? '' : 'on'}`} style={{ width: '100%', justifyContent: 'flex-start', marginTop: 8 }}
+            onClick={() => set('active', d.active === false ? true : false)}>
+            <span className="chk-box">{d.active !== false && <i className="ti ti-check" aria-hidden="true"></i>}</span>
+            Ativo {d.active === false && '— desativado, deixa de aparecer nas inspeções novas'}
+          </button>
+        )}
+
+        <div className="wf-nav" style={{ marginTop: 12 }}>
+          <button className="btn-ghost" onClick={() => setEdit(null)}>Cancelar</button>
+          <button className="btn-primary" disabled={busy} onClick={gravar}>{busy ? 'A guardar…' : 'Guardar'}</button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 10 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Voltar</button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Modelo de inspeção</h2><span />
+      </div>
+      {msg && <Banner msg={msg} onClose={() => setMsg(null)} />}
+      <p className="hint" style={{ marginBottom: 12 }}>
+        O que aqui mudares aplica-se às inspeções novas. As já feitas ficam como estavam.
+      </p>
+
+      {loading && <p className="hint">A carregar…</p>}
+
+      {!loading && edit && edit.tipo === 'section' && !edit.id && formEdit()}
+
+      {!loading && tree.map((s: any) => (
+        <div key={s.id} className={`mdl-sec ${s.active ? '' : 'off'}`}>
+          <button className="mdl-sec-head" onClick={() => setAberta(aberta === s.id ? null : s.id)}>
+            <span className="mdl-sec-name">{s.name}</span>
+            <span className="mdl-badge">{NIVEIS_LBL[s.min_level]}</span>
+            {!s.active && <span className="mdl-off">desativada</span>}
+            <span className="mdl-count">{s.points.filter((p: any) => p.active).length}</span>
+            <i className={`ti ti-chevron-${aberta === s.id ? 'up' : 'down'}`} aria-hidden="true"></i>
+          </button>
+
+          {aberta === s.id && (
+            <div className="mdl-sec-body">
+              <div className="mdl-actions">
+                <button className="btn-ghost btn-sm" onClick={() => setEdit({ tipo: 'section', id: s.id, dados: { name: s.name, minLevel: s.min_level, sortOrder: s.sort_order, active: s.active } })}>
+                  <i className="ti ti-pencil" aria-hidden="true"></i> Editar secção
+                </button>
+                <button className="btn-ghost btn-sm" onClick={() => setEdit({ tipo: 'point', dados: { sectionId: s.id, name: '', minLevel: s.min_level, sortOrder: (s.points.length + 1) * 10, hint: '' } })}>
+                  <i className="ti ti-plus" aria-hidden="true"></i> Novo ponto
+                </button>
+              </div>
+              {edit && edit.tipo === 'section' && edit.id === s.id && formEdit()}
+              {edit && edit.tipo === 'point' && !edit.id && edit.dados.sectionId === s.id && formEdit()}
+
+              {s.points.map((p: any) => (
+                <div key={p.id} className={`mdl-pt ${p.active ? '' : 'off'}`}>
+                  <div className="mdl-pt-head">
+                    <span className="mdl-pt-name">{p.name}</span>
+                    <span className="mdl-badge">{NIVEIS_LBL[p.min_level]}</span>
+                    {!p.active && <span className="mdl-off">desativado</span>}
+                    <button className="mdl-edit" onClick={() => setEdit({ tipo: 'point', id: p.id, dados: { name: p.name, minLevel: p.min_level, sortOrder: p.sort_order, active: p.active, hint: p.hint || '', appliesFuel: p.applies_fuel || [], appliesDrivetrain: p.applies_drivetrain || [] } })}>
+                      <i className="ti ti-pencil" aria-hidden="true"></i>
+                    </button>
+                  </div>
+                  {(p.applies_fuel || p.applies_drivetrain) && (
+                    <div className="mdl-aplica">
+                      só: {[...(p.applies_fuel || []), ...(p.applies_drivetrain || [])].join(', ')}
+                    </div>
+                  )}
+                  {p.hint && <div className="mdl-hint">{p.hint.length > 120 ? p.hint.slice(0, 120) + '…' : p.hint}</div>}
+                  <div className="mdl-fields">
+                    {p.fields.map((f: any) => (
+                      <button key={f.id} className={`mdl-fld ${f.active ? '' : 'off'}`}
+                        onClick={() => setEdit({ tipo: 'field', id: f.id, dados: { label: f.label, fieldType: f.field_type, unit: f.unit || '', required: f.required, sortOrder: f.sort_order, active: f.active, hint: f.hint || '' } })}>
+                        {f.label}
+                        <span className="mdl-fld-t">{TIPOS_LBL[f.field_type]}</span>
+                        {f.required && <span className="mdl-fld-r">obrig.</span>}
+                      </button>
+                    ))}
+                    <button className="mdl-fld add" onClick={() => setEdit({ tipo: 'field', dados: { pointId: p.id, label: '', fieldType: 'state', required: false, sortOrder: (p.fields.length + 1) * 10 } })}>
+                      <i className="ti ti-plus" aria-hidden="true"></i> campo
+                    </button>
+                  </div>
+                  {edit && edit.tipo === 'point' && edit.id === p.id && formEdit()}
+                  {edit && edit.tipo === 'field' && (edit.id ? p.fields.some((f: any) => f.id === edit.id) : edit.dados.pointId === p.id) && formEdit()}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+
+      {!loading && (
+        <button className="btn-ghost" style={{ width: '100%', justifyContent: 'center', marginTop: 12 }}
+          onClick={() => setEdit({ tipo: 'section', dados: { name: '', minLevel: 'basic', sortOrder: (tree.length + 1) * 10 } })}>
+          <i className="ti ti-plus" aria-hidden="true"></i> Nova secção
+        </button>
+      )}
+    </main>
+  )
+}
+
 function PPICharacterise({ insp, busy, onBack, onSave }: {
   insp: any; busy: boolean; onBack: () => void
   onSave: (fuel: string | null, drive: string | null, gear: string | null) => void
@@ -3582,6 +3808,112 @@ function ConfirmBox({ ask, onYes, onNo }: { ask: { text: string; detail?: string
 }
 
 // ── ORDEM DE SERVIÇO — Fatia 1: Diagnóstico ──────────────────
+// ── Estado de um serviço, com mudança e histórico ────────────
+// Login = assinatura: quem muda fica no registo, sem assinar.
+// Qualquer transição é possível (inclui recuar); só se pede
+// motivo quando faz sentido (recuo, "não feito", pausa).
+const SVC_STATES: [string, string, string][] = [
+  ['awaiting_diagnosis', 'Aguarda diagnóstico', 'ti-search'],
+  ['pending', 'Por começar', 'ti-clock'],
+  ['in_progress', 'Em execução', 'ti-tool'],
+  ['awaiting_approval', 'Aguarda aprovação', 'ti-user-question'],
+  ['awaiting_part', 'Aguarda peça', 'ti-package'],
+  ['on_hold', 'Em pausa', 'ti-player-pause'],
+  ['done', 'Concluído', 'ti-check'],
+  ['not_done', 'Não feito', 'ti-x'],
+]
+const svcLabel = (s: string) => (SVC_STATES.find(x => x[0] === s) || ['', s, ''])[1]
+const svcIcon = (s: string) => (SVC_STATES.find(x => x[0] === s) || ['', '', 'ti-point'])[2]
+const svcClass = (s: string) =>
+  s === 'done' ? 'ok' : s === 'not_done' ? 'no' :
+  s === 'in_progress' ? 'go' : (s === 'awaiting_part' || s === 'awaiting_approval' || s === 'on_hold') ? 'wait' : 'idle'
+// Estados que, por serem recuo ou decisão, pedem um motivo.
+const PEDE_MOTIVO = ['awaiting_part', 'on_hold', 'not_done', 'awaiting_diagnosis']
+const ORDEM: Record<string, number> = { awaiting_diagnosis: 0, pending: 1, in_progress: 2, awaiting_approval: 3, awaiting_part: 3, on_hold: 3, done: 4, not_done: 4 }
+
+function ServiceRow({ svc, onChanged, say }: { svc: any; onChanged: () => void; say: (k: 'err' | 'ok', t: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [hist, setHist] = useState<any[] | null>(null)
+  const [pend, setPend] = useState<string | null>(null)   // estado à espera de motivo
+  const [motivo, setMotivo] = useState('')
+
+  const mudar = async (novo: string, reason?: string) => {
+    setBusy(true)
+    try {
+      await api(`/api/v1/os/services/${svc.id}/status`, { method: 'POST',
+        body: JSON.stringify({ status: novo, reason: reason || null }) })
+      setOpen(false); setPend(null); setMotivo(''); onChanged()
+    } catch (e: any) { say('err', e?.message || 'Não foi possível mudar o estado.') }
+    finally { setBusy(false) }
+  }
+
+  const escolher = (novo: string) => {
+    if (novo === svc.status) { setOpen(false); return }
+    const recuo = (ORDEM[novo] ?? 9) < (ORDEM[svc.status] ?? 0)
+    if (PEDE_MOTIVO.includes(novo) || recuo) { setPend(novo); return }  // pede motivo
+    mudar(novo)
+  }
+
+  const verHist = async () => {
+    if (hist) { setHist(null); return }
+    try { const r = await api(`/api/v1/os/services/${svc.id}/history`); setHist(r.history || []) }
+    catch { say('err', 'Não foi possível carregar o histórico.') }
+  }
+
+  return (
+    <div className="svc-row">
+      <div className="svc-main">
+        <div className="svc-name">{svc.type_name}</div>
+        <button className={`svc-state ${svcClass(svc.status)}`} onClick={() => setOpen(!open)} disabled={busy}>
+          <i className={`ti ${svcIcon(svc.status)}`} aria-hidden="true"></i> {svcLabel(svc.status)}
+          <i className="ti ti-chevron-down" aria-hidden="true"></i>
+        </button>
+      </div>
+      {svc.status_note && <div className="svc-note">{svc.status_note}</div>}
+      {svc.assigned_name && <div className="svc-assigned">com {svc.assigned_name}</div>}
+
+      {open && !pend && (
+        <div className="svc-picker">
+          {SVC_STATES.map(([v, l, ic]) => (
+            <button key={v} className={`svc-opt ${v === svc.status ? 'on' : ''}`} onClick={() => escolher(v)} disabled={busy}>
+              <i className={`ti ${ic}`} aria-hidden="true"></i> {l}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {pend && (
+        <div className="svc-motivo">
+          <label className="fl">Porquê passa a "{svcLabel(pend)}"?</label>
+          <textarea rows={2} value={motivo} onChange={e => setMotivo(e.target.value)}
+            placeholder={pend === 'not_done' ? 'ex: cliente recusou / não era necessário' : pend === 'awaiting_part' ? 'ex: à espera do disco de travão' : 'motivo…'} />
+          <div className="wf-nav" style={{ marginTop: 8 }}>
+            <button className="btn-ghost btn-sm" onClick={() => { setPend(null); setMotivo('') }}>Cancelar</button>
+            <button className="btn-primary btn-sm" disabled={busy || motivo.trim().length < 2} onClick={() => mudar(pend, motivo)}>Guardar</button>
+          </div>
+        </div>
+      )}
+
+      <button className="svc-hist-toggle" onClick={verHist}>
+        <i className="ti ti-history" aria-hidden="true"></i> {hist ? 'Esconder histórico' : 'Histórico'}
+      </button>
+      {hist && (
+        <div className="svc-hist">
+          {hist.length === 0 && <div className="svc-hist-empty">Sem transições.</div>}
+          {hist.map((h: any, i: number) => (
+            <div key={i} className="svc-hist-row">
+              <span className="svc-hist-arrow">{h.from_status ? `${svcLabel(h.from_status)} → ` : ''}{svcLabel(h.to_status)}</span>
+              <span className="svc-hist-meta">{h.by_name || '—'} · {new Date(h.changed_at).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+              {h.reason && <span className="svc-hist-reason">{h.reason}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: string; onBack: () => void; myId: string; isOwner: boolean; onOpenEntry?: (id: string) => void }) {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -3780,6 +4112,14 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
       {jo.diag_rejected_note && isDiag && (
         <div className="os-reject-note"><i className="ti ti-alert-triangle" aria-hidden="true"></i> Diagnóstico devolvido: {jo.diag_rejected_note}</div>
       )}
+
+      <div className="det-section-title" style={{ marginTop: 18 }}>Serviços deste carro</div>
+      <div className="svc-list">
+        {(data?.services || []).length === 0 && <p className="hint">Sem serviços registados.</p>}
+        {(data?.services || []).map((s: any) => (
+          <ServiceRow key={s.id} svc={s} onChanged={load} say={say} />
+        ))}
+      </div>
 
       <div className="det-section-title" style={{ marginTop: 18 }}>Lista de problemas</div>
       <div className="prob-list">
