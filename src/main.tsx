@@ -682,7 +682,7 @@ function Reception({ onDone, onBack, resumeDraftId, onStartPPI }: { onDone: () =
         setDamages(ds => ds.map(d => d.photo ? { ...d, photo: null } : d))
         setProgress(null)
       }
-      setResult({ number: r.number, offline: false, draft: true } as any)
+      setResult({ number: r.number, offline: false, draft: true })
     } catch (e: any) {
       setProgress(null)
       alert(e?.message || 'Não foi possível guardar o rascunho.')
@@ -3791,16 +3791,25 @@ function Banner({ msg, onClose }: { msg: { kind: 'err' | 'ok'; text: string } | 
   )
 }
 
-function ConfirmBox({ ask, onYes, onNo }: { ask: { text: string; detail?: string; danger?: boolean; yes?: string } | null; onYes: () => void; onNo: () => void }) {
+function ConfirmBox({ ask, onYes, onNo }: { ask: any | null; onYes: (reason?: string) => void; onNo: () => void }) {
+  const [reason, setReason] = useState('')
+  useEffect(() => { setReason('') }, [ask])
   if (!ask) return null
+  const precisaMotivo = !!ask.needsReason
   return (
     <div className="modal-scrim" onClick={onNo}>
       <div className="modal-card" onClick={e => e.stopPropagation()}>
         <div className="modal-title">{ask.text}</div>
         {ask.detail && <p className="modal-detail">{ask.detail}</p>}
+        {precisaMotivo && (
+          <textarea className="modal-reason" rows={2} value={reason} onChange={e => setReason(e.target.value)}
+            placeholder={ask.reasonPlaceholder || 'motivo…'} autoFocus />
+        )}
         <div className="rec-nav" style={{ marginTop: 18 }}>
           <button className="btn-ghost" onClick={onNo}>Cancelar</button>
-          <button className={ask.danger ? 'btn-ghost danger' : 'btn-primary'} onClick={onYes}>{ask.yes || 'Confirmar'}</button>
+          <button className={ask.danger ? 'btn-ghost danger' : 'btn-primary'}
+            disabled={precisaMotivo && reason.trim().length < 2}
+            onClick={() => onYes(precisaMotivo ? reason.trim() : undefined)}>{ask.yes || 'Confirmar'}</button>
         </div>
       </div>
     </div>
@@ -3864,7 +3873,9 @@ function ServiceRow({ svc, onChanged, say }: { svc: any; onChanged: () => void; 
   return (
     <div className="svc-row">
       <div className="svc-main">
-        <div className="svc-name">{svc.type_name}</div>
+        <div className="svc-name">{svc.type_name}
+          {svc.source === 'diagnosis' && <span className="svc-src">do diagnóstico</span>}
+        </div>
         <button className={`svc-state ${svcClass(svc.status)}`} onClick={() => setOpen(!open)} disabled={busy}>
           <i className={`ti ${svcIcon(svc.status)}`} aria-hidden="true"></i> {svcLabel(svc.status)}
           <i className="ti ti-chevron-down" aria-hidden="true"></i>
@@ -3949,7 +3960,7 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
   const isDiag = jo?.status === 'in_diagnosis'
   const [acting, setActing] = useState(false)      // trava toques repetidos em 3G
   const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
-  const [ask, setAsk] = useState<{ text: string; detail?: string; danger?: boolean; yes?: string; run: () => void } | null>(null)
+  const [ask, setAsk] = useState<{ text: string; detail?: string; danger?: boolean; yes?: string; needsReason?: boolean; reasonPlaceholder?: string; run: (reason?: string) => void } | null>(null)
   const say = (kind: 'err' | 'ok', text: string) => { setMsg({ kind, text }); if (kind === 'ok') setTimeout(() => setMsg(null), 4000) }
   const isReview = jo?.status === 'diagnosis_review'
   const authOn = data?.diagAuthorizationOn
@@ -4004,6 +4015,32 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
   const updateProblem = async (pid: string, fields: any) => {
     try { await api(`/api/v1/os/problems/${pid}`, { method: 'POST', body: JSON.stringify(fields) }); load() }
     catch (e: any) { say('err', e?.message || 'Não foi possível guardar a alteração.') }
+  }
+  const toService = async (p: any) => {
+    if (acting) return
+    setActing(true)
+    try {
+      await api(`/api/v1/os/problems/${p.id}/to-service`, { method: 'POST', body: JSON.stringify({}) })
+      say('ok', 'Passou para a lista de serviços a fazer.')
+      await load()
+    } catch (e: any) { say('err', e?.message || 'Não foi possível criar o serviço.') }
+    finally { setActing(false) }
+  }
+  const dismissProblem = (pid: string) => {
+    setAsk({
+      text: 'Porque é que não se faz?', danger: false, yes: 'Dispensar',
+      needsReason: true, reasonPlaceholder: 'ex: cliente não quer / não é necessário / adiado',
+      run: async (reason?: string) => {
+        setActing(true)
+        try { await api(`/api/v1/os/problems/${pid}/dismiss`, { method: 'POST', body: JSON.stringify({ reason }) }); await load() }
+        catch (e: any) { say('err', e?.message || 'Não foi possível dispensar.') }
+        finally { setActing(false) }
+      },
+    })
+  }
+  const reopenProblem = async (pid: string) => {
+    try { await api(`/api/v1/os/problems/${pid}/reopen`, { method: 'POST' }); await load() }
+    catch (e: any) { say('err', e?.message || 'Não foi possível reabrir.') }
   }
   const deleteProblem = (pid: string) => {
     if (acting) return
@@ -4100,7 +4137,7 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
         </button>
       )}
       <Banner msg={msg} onClose={() => setMsg(null)} />
-      <ConfirmBox ask={ask} onNo={() => setAsk(null)} onYes={() => { const r = ask?.run; setAsk(null); r?.() }} />
+      <ConfirmBox ask={ask} onNo={() => setAsk(null)} onYes={(reason?: string) => { const r = ask?.run; setAsk(null); r?.(reason) }} />
 
       <div className="os-status-bar">
         <span className="os-veh">{jo.brand} {jo.model} · {jo.plate}</span>
@@ -4140,6 +4177,25 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
               ))}
               {isDiag && <button className="prob-add-photo" onClick={() => addPhoto(p.id)}><i className="ti ti-camera" aria-hidden="true"></i></button>}
             </div>
+
+            {/* Decisão: o que fazer com este achado */}
+            {p.status === 'converted' ? (
+              <div className="prob-decided ok"><i className="ti ti-arrow-right" aria-hidden="true"></i> Virou serviço: {p.service_name}</div>
+            ) : p.status === 'dismissed' ? (
+              <div className="prob-decided no">
+                <div><i className="ti ti-ban" aria-hidden="true"></i> Dispensado: {p.dismiss_reason}</div>
+                <button className="prob-undo" onClick={() => reopenProblem(p.id)}>Reabrir</button>
+              </div>
+            ) : (
+              <div className="prob-decide">
+                <button className="btn-primary btn-sm" onClick={() => toService(p)}>
+                  <i className="ti ti-tool" aria-hidden="true"></i> Transformar em serviço
+                </button>
+                <button className="btn-ghost btn-sm" onClick={() => dismissProblem(p.id)}>
+                  <i className="ti ti-ban" aria-hidden="true"></i> Não fazer
+                </button>
+              </div>
+            )}
           </div>
         ))}
         {problems.length === 0 && <p className="empty">Sem problemas na lista.</p>}
