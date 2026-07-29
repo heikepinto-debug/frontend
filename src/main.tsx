@@ -102,7 +102,7 @@ function Shell() {
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
   const [temUpdate, setTemUpdate] = useState(false)   // há versão nova à espera
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates' | 'ppi-model'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates' | 'ppi-model' | 'suppliers'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
@@ -177,6 +177,7 @@ function Shell() {
     nav('tasks', 'Tarefas', 'ti-checklist'),
     canDo('config:manage') && nav('servicetypes', 'Tipos de serviço', 'ti-tool'),
     canDo('config:manage') && nav('ppi-model', 'Modelo de inspeção', 'ti-adjustments'),
+    canDo('config:manage') && nav('suppliers', 'Fornecedores', 'ti-building-store'),
     nav('updates', 'Novidades', 'ti-bell'),
   ].filter(Boolean) as any[]
 
@@ -334,6 +335,7 @@ function Shell() {
       )}
       {view === 'updates' && <UpdatesPage onBack={() => setView('home')} />}
       {view === 'ppi-model' && <PPIModel onBack={() => setView('home')} />}
+      {view === 'suppliers' && <SuppliersPage onBack={() => setView('home')} />}
       {view === 'ppi-list' && <PPIList onBack={() => setView('home')} onOpen={(joId: string) => { setPpiJoId(joId); setPpiReturnTo('ppi-list'); setView('ppi') }} />}
       {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
         onOpenPPI={(id: string) => { setPpiJoId(id); setPpiReturnTo('list'); setView('ppi') }}
@@ -2847,6 +2849,72 @@ function PPIModel({ onBack }: { onBack: () => void }) {
   )
 }
 
+// ── Fornecedores (lista simples, só dono) ────────────────────
+function SuppliersPage({ onBack }: { onBack: () => void }) {
+  const [rows, setRows] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
+  const [novo, setNovo] = useState<{ name: string; contact: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const carregar = () => {
+    setLoading(true)
+    api('/api/v1/suppliers').then(r => setRows(r.suppliers || [])).catch(() => {}).finally(() => setLoading(false))
+  }
+  useEffect(carregar, [])
+
+  const criar = async () => {
+    if (!novo || novo.name.trim().length < 1) return
+    setBusy(true)
+    try {
+      await api('/api/v1/suppliers', { method: 'POST', body: JSON.stringify({ name: novo.name.trim(), contact: novo.contact || null }) })
+      setNovo(null); carregar(); setMsg({ kind: 'ok', text: 'Fornecedor criado.' })
+    } catch (e: any) { setMsg({ kind: 'err', text: e?.message || 'Não foi possível criar.' }) }
+    finally { setBusy(false) }
+  }
+  const desativar = async (id: string) => {
+    try { await api(`/api/v1/suppliers/${id}`, { method: 'PATCH', body: JSON.stringify({ active: false }) }); carregar() }
+    catch { setMsg({ kind: 'err', text: 'Não foi possível remover.' }) }
+  }
+
+  return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 12 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Voltar</button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Fornecedores</h2><span />
+      </div>
+      {msg && <Banner msg={msg} onClose={() => setMsg(null)} />}
+      <p className="hint" style={{ marginBottom: 12 }}>Os sítios para onde envias serviços terceirizados — como o skim dos discos.</p>
+
+      {loading && <p className="hint">A carregar…</p>}
+      {!loading && rows.length === 0 && !novo && <p className="hint">Ainda não há fornecedores.</p>}
+
+      {rows.map((s: any) => (
+        <div key={s.id} className="supp-row">
+          <div><div className="supp-name">{s.name}</div>{s.contact && <div className="supp-contact">{s.contact}</div>}</div>
+          <button className="mdl-edit" onClick={() => desativar(s.id)} title="Remover"><i className="ti ti-trash" aria-hidden="true"></i></button>
+        </div>
+      ))}
+
+      {novo ? (
+        <div className="mdl-form">
+          <div className="mdl-form-head">Novo fornecedor</div>
+          <div className="mdl-f"><label className="fl">Nome</label><input value={novo.name} onChange={e => setNovo({ ...novo, name: e.target.value })} placeholder="ex: Retífica Central" autoFocus /></div>
+          <div className="mdl-f"><label className="fl">Contacto (opcional)</label><input value={novo.contact} onChange={e => setNovo({ ...novo, contact: e.target.value })} placeholder="telefone, WhatsApp" /></div>
+          <div className="wf-nav">
+            <button className="btn-ghost" onClick={() => setNovo(null)}>Cancelar</button>
+            <button className="btn-primary" disabled={busy || novo.name.trim().length < 1} onClick={criar}>Guardar</button>
+          </div>
+        </div>
+      ) : (
+        <button className="btn-ghost" style={{ width: '100%', justifyContent: 'center', marginTop: 12 }} onClick={() => setNovo({ name: '', contact: '' })}>
+          <i className="ti ti-plus" aria-hidden="true"></i> Novo fornecedor
+        </button>
+      )}
+    </main>
+  )
+}
+
 function PPICharacterise({ insp, busy, onBack, onSave }: {
   insp: any; busy: boolean; onBack: () => void
   onSave: (fuel: string | null, drive: string | null, gear: string | null) => void
@@ -3846,6 +3914,26 @@ function ServiceRow({ svc, onChanged, say }: { svc: any; onChanged: () => void; 
   const [hist, setHist] = useState<any[] | null>(null)
   const [pend, setPend] = useState<string | null>(null)   // estado à espera de motivo
   const [motivo, setMotivo] = useState('')
+  const [outOpen, setOutOpen] = useState(false)
+  const [suppliers, setSuppliers] = useState<any[]>([])
+  const podeFinance = useSession(s => s.can)('finance:read')
+
+  const OUT_LBL: any = { none: '', sent: 'Enviado ao fornecedor', at_supplier: 'No fornecedor', returned: 'Voltou do fornecedor' }
+
+  const abrirOut = async () => {
+    setOutOpen(!outOpen)
+    if (!outOpen && suppliers.length === 0) {
+      try { const r = await api('/api/v1/suppliers'); setSuppliers(r.suppliers || []) } catch {}
+    }
+  }
+  const gravarOut = async (patch: any) => {
+    setBusy(true)
+    try {
+      await api(`/api/v1/os/services/${svc.id}/outsource`, { method: 'POST', body: JSON.stringify(patch) })
+      onChanged()
+    } catch (e: any) { say('err', e?.message || 'Não foi possível guardar.') }
+    finally { setBusy(false) }
+  }
 
   const mudar = async (novo: string, reason?: string) => {
     setBusy(true)
@@ -3903,6 +3991,55 @@ function ServiceRow({ svc, onChanged, say }: { svc: any; onChanged: () => void; 
             <button className="btn-ghost btn-sm" onClick={() => { setPend(null); setMotivo('') }}>Cancelar</button>
             <button className="btn-primary btn-sm" disabled={busy || motivo.trim().length < 2} onClick={() => mudar(pend, motivo)}>Guardar</button>
           </div>
+        </div>
+      )}
+
+      {svc.outsourced && (
+        <div className="svc-out-badge">
+          <i className="ti ti-external-link" aria-hidden="true"></i>
+          {svc.supplier_name || 'Fornecedor'} · {OUT_LBL[svc.outsource_status] || 'terceirizado'}
+        </div>
+      )}
+
+      <button className="svc-out-toggle" onClick={abrirOut}>
+        <i className="ti ti-building-store" aria-hidden="true"></i> {svc.outsourced ? 'Gerir terceirização' : 'Terceirizar este serviço'}
+      </button>
+      {outOpen && (
+        <div className="svc-out-panel">
+          <button className={`chk ${svc.outsourced ? 'on' : ''}`} style={{ width: '100%', justifyContent: 'flex-start' }}
+            onClick={() => gravarOut({ outsourced: !svc.outsourced })} disabled={busy}>
+            <span className="chk-box">{svc.outsourced && <i className="ti ti-check" aria-hidden="true"></i>}</span>
+            É feito por um fornecedor externo
+          </button>
+
+          {svc.outsourced && (
+            <>
+              <label className="fl" style={{ marginTop: 10 }}>Fornecedor</label>
+              <select value={svc.supplier_id || ''} onChange={e => gravarOut({ outsourced: true, supplierId: e.target.value || null })} disabled={busy}>
+                <option value="">— escolher —</option>
+                {suppliers.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+
+              <label className="fl" style={{ marginTop: 10 }}>Estado</label>
+              <div className="seg-row">
+                {['sent', 'at_supplier', 'returned'].map(st => (
+                  <button key={st} className={`seg ${svc.outsource_status === st ? 'on' : ''}`}
+                    onClick={() => gravarOut({ outsourced: true, status: st })} disabled={busy}>
+                    {st === 'sent' ? 'Enviado' : st === 'at_supplier' ? 'No fornecedor' : 'Voltou'}
+                  </button>
+                ))}
+              </div>
+
+              {podeFinance && (
+                <>
+                  <label className="fl" style={{ marginTop: 10 }}>Custo do fornecedor (MT) <span className="opt-tag">só contas</span></label>
+                  <input type="number" inputMode="decimal" defaultValue={svc.supplier_cost ?? ''}
+                    placeholder="o que o fornecedor cobra"
+                    onBlur={e => { const v = e.target.value === '' ? null : parseFloat(e.target.value); gravarOut({ outsourced: true, cost: v }) }} />
+                </>
+              )}
+            </>
+          )}
         </div>
       )}
 
