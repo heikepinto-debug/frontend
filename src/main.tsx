@@ -4069,7 +4069,6 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
   const [newProblem, setNewProblem] = useState('')
   const [notes, setNotes] = useState('')
   const [showAuth, setShowAuth] = useState(false)
-  const [authSig, setAuthSig] = useState<string | null>(null)
   const [rejecting, setRejecting] = useState(false)
   const [rejectNote, setRejectNote] = useState('')
   const [photoView, setPhotoView] = useState<string | null>(null)
@@ -4243,8 +4242,7 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
     })
   }
   const authorize = async () => {
-    if (!authSig) return
-    try { await api(`/api/v1/os/${joId}/authorize-diagnosis`, { method: 'POST', body: JSON.stringify({ approve: true, signature: authSig }) }); setShowAuth(false); load(); say('ok', 'Diagnóstico autorizado.') }
+    try { await api(`/api/v1/os/${joId}/authorize-diagnosis`, { method: 'POST', body: JSON.stringify({ approve: true }) }); setShowAuth(false); load(); say('ok', 'Diagnóstico autorizado.') }
     catch (e: any) { say('err', e?.message || 'Não foi possível autorizar.') }
   }
   const reject = async () => {
@@ -4385,13 +4383,11 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
           ) : (
             <div style={{ marginTop: 12 }}>
               <div className="os-auth-notice">
-                Ao assinar, assumo a responsabilidade técnica partilhada por este diagnóstico, nos termos das minhas funções.
+                Ao autorizar, assumo a responsabilidade técnica partilhada por este diagnóstico, nos termos das minhas funções. Fica registado que foi você, com a data e a hora.
               </div>
-              <label className="fl" style={{ marginTop: 10 }}>Assinatura <span className="req">*</span></label>
-              <SignaturePad onChange={setAuthSig} />
-              <div className="rec-nav">
+              <div className="rec-nav" style={{ marginTop: 14 }}>
                 <button className="btn-ghost" onClick={() => setShowAuth(false)}>Voltar</button>
-                <button className="btn-primary" disabled={!authSig} onClick={authorize}>Autorizar diagnóstico</button>
+                <button className="btn-primary" onClick={authorize}>Autorizar diagnóstico</button>
               </div>
             </div>
           )}
