@@ -3908,7 +3908,7 @@ const svcClass = (s: string) =>
 const PEDE_MOTIVO = ['awaiting_part', 'on_hold', 'not_done', 'awaiting_diagnosis']
 const ORDEM: Record<string, number> = { awaiting_diagnosis: 0, pending: 1, in_progress: 2, awaiting_approval: 3, awaiting_part: 3, on_hold: 3, done: 4, not_done: 4 }
 
-function ServiceRow({ svc, onChanged, say }: { svc: any; onChanged: () => void; say: (k: 'err' | 'ok', t: string) => void }) {
+function ServiceRow({ svc, onChanged, say, team, responsibleId }: { svc: any; onChanged: () => void; say: (k: 'err' | 'ok', t: string) => void; team: any[]; responsibleId?: string | null }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [hist, setHist] = useState<any[] | null>(null)
@@ -3916,9 +3916,21 @@ function ServiceRow({ svc, onChanged, say }: { svc: any; onChanged: () => void; 
   const [motivo, setMotivo] = useState('')
   const [outOpen, setOutOpen] = useState(false)
   const [suppliers, setSuppliers] = useState<any[]>([])
+  const [showWorkers, setShowWorkers] = useState(false)
   const podeFinance = useSession(s => s.can)('finance:read')
 
   const OUT_LBL: any = { none: '', sent: 'Enviado ao fornecedor', at_supplier: 'No fornecedor', returned: 'Voltou do fornecedor' }
+  const workers: any[] = svc.workers || []
+  const temResponsavel = workers.some((w: any) => w.userId === responsibleId)
+
+  const addWorker = async (userId: string, isHelper: boolean) => {
+    try { await api(`/api/v1/os/services/${svc.id}/workers`, { method: 'POST', body: JSON.stringify({ userId, isHelper }) }); onChanged() }
+    catch (e: any) { say('err', e?.message || 'Não foi possível registar.') }
+  }
+  const removeWorker = async (userId: string) => {
+    try { await api(`/api/v1/os/services/${svc.id}/workers/${userId}`, { method: 'DELETE' }); onChanged() }
+    catch { say('err', 'Não foi possível remover.') }
+  }
 
   const abrirOut = async () => {
     setOutOpen(!outOpen)
@@ -3940,7 +3952,16 @@ function ServiceRow({ svc, onChanged, say }: { svc: any; onChanged: () => void; 
     try {
       await api(`/api/v1/os/services/${svc.id}/status`, { method: 'POST',
         body: JSON.stringify({ status: novo, reason: reason || null }) })
-      setOpen(false); setPend(null); setMotivo(''); onChanged()
+      setOpen(false); setPend(null); setMotivo('')
+      // Ao concluir, pergunta quem trabalhou. Se ainda não há ninguém
+      // e há um responsável do carro, entra ele por defeito.
+      if (novo === 'done') {
+        if ((svc.workers || []).length === 0 && responsibleId) {
+          await api(`/api/v1/os/services/${svc.id}/workers`, { method: 'POST', body: JSON.stringify({ userId: responsibleId, isHelper: false }) })
+        }
+        setShowWorkers(true)
+      }
+      onChanged()
     } catch (e: any) { say('err', e?.message || 'Não foi possível mudar o estado.') }
     finally { setBusy(false) }
   }
@@ -4040,6 +4061,41 @@ function ServiceRow({ svc, onChanged, say }: { svc: any; onChanged: () => void; 
               )}
             </>
           )}
+        </div>
+      )}
+
+      {(svc.status === 'done' && workers.length > 0 && !showWorkers) && (
+        <div className="svc-workers-sum">
+          <i className="ti ti-users" aria-hidden="true"></i>
+          {workers.map((w: any) => w.name + (w.isHelper ? ' (ajuda)' : '')).join(', ')}
+          <button className="svc-workers-edit" onClick={() => setShowWorkers(true)}>alterar</button>
+        </div>
+      )}
+
+      {showWorkers && (
+        <div className="svc-workers-panel">
+          <div className="swp-title">Quem trabalhou neste serviço?</div>
+          {workers.length > 0 && (
+            <div className="swp-chips">
+              {workers.map((w: any) => (
+                <span key={w.userId} className={`swp-chip ${w.isHelper ? 'help' : ''}`}>
+                  {w.name}{w.isHelper && ' · ajuda'}
+                  <button onClick={() => removeWorker(w.userId)}><i className="ti ti-x" aria-hidden="true"></i></button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="swp-add">
+            <span className="swp-add-label">Acrescentar quem ajudou:</span>
+            <div className="swp-add-list">
+              {team.filter((m: any) => !workers.some((w: any) => w.userId === m.id)).map((m: any) => (
+                <button key={m.id} className="swp-add-btn" onClick={() => addWorker(m.id, true)}>
+                  <i className="ti ti-plus" aria-hidden="true"></i> {m.full_name}
+                </button>
+              ))}
+            </div>
+          </div>
+          <button className="btn-primary btn-sm" style={{ marginTop: 10 }} onClick={() => setShowWorkers(false)}>Pronto</button>
         </div>
       )}
 
@@ -4281,6 +4337,18 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
         </span>
       </div>
 
+      <div className="os-responsible">
+        <i className="ti ti-user-star" aria-hidden="true"></i>
+        <span className="os-resp-label">Responsável:</span>
+        <select value={jo.responsible_id || ''} onChange={async e => {
+          try { await api(`/api/v1/os/${jo.id}/responsible`, { method: 'POST', body: JSON.stringify({ userId: e.target.value || null }) }); load() }
+          catch { say('err', 'Não foi possível definir o responsável.') }
+        }}>
+          <option value="">— ninguém —</option>
+          {(data?.team || []).map((m: any) => <option key={m.id} value={m.id}>{m.full_name}</option>)}
+        </select>
+      </div>
+
       {jo.diag_rejected_note && isDiag && (
         <div className="os-reject-note"><i className="ti ti-alert-triangle" aria-hidden="true"></i> Diagnóstico devolvido: {jo.diag_rejected_note}</div>
       )}
@@ -4289,7 +4357,7 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
       <div className="svc-list">
         {(data?.services || []).length === 0 && <p className="hint">Sem serviços registados.</p>}
         {(data?.services || []).map((s: any) => (
-          <ServiceRow key={s.id} svc={s} onChanged={load} say={say} />
+          <ServiceRow key={s.id} svc={s} onChanged={load} say={say} team={data?.team || []} responsibleId={jo.responsible_id} />
         ))}
       </div>
 
