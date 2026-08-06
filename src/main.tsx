@@ -4150,6 +4150,13 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
   const jo = data?.jo
   const problems = data?.problems || []
   const isDiag = jo?.status === 'in_diagnosis'
+  // Resumo do progresso dos serviços — informa a fase do carro sem a
+  // controlar. Só conta o que não foi dispensado ("não feito").
+  const svcs = (data?.services || []).filter((s: any) => s.status !== 'not_done')
+  const svcDone = svcs.filter((s: any) => s.status === 'done').length
+  const svcWaiting = svcs.filter((s: any) => ['awaiting_part', 'awaiting_approval', 'on_hold'].includes(s.status)).length
+  const todosProntos = svcs.length > 0 && svcDone === svcs.length
+  const jaMarcadoPronto = ['ready', 'delivered'].includes(jo?.status)
   const [acting, setActing] = useState(false)      // trava toques repetidos em 3G
   const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
   const [ask, setAsk] = useState<{ text: string; detail?: string; danger?: boolean; yes?: string; needsReason?: boolean; reasonPlaceholder?: string; run: (reason?: string) => void } | null>(null)
@@ -4336,6 +4343,28 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
           {jo.status === 'in_diagnosis' ? 'Em diagnóstico' : jo.status === 'diagnosis_review' ? 'Aguarda autorização' : jo.status === 'awaiting_quote' ? 'Diagnóstico concluído' : jo.status}
         </span>
       </div>
+
+      {svcs.length > 0 && (
+        <div className="os-progress">
+          <div className="os-progress-bar">
+            <div className="os-progress-fill" style={{ width: `${Math.round((svcDone / svcs.length) * 100)}%` }} />
+          </div>
+          <div className="os-progress-txt">
+            <strong>{svcDone} de {svcs.length}</strong> {svcs.length === 1 ? 'serviço concluído' : 'serviços concluídos'}
+            {svcWaiting > 0 && <span className="os-progress-wait"> · {svcWaiting} à espera</span>}
+          </div>
+        </div>
+      )}
+
+      {todosProntos && !jaMarcadoPronto && (
+        <div className="os-ready-hint">
+          <div><i className="ti ti-circle-check" aria-hidden="true"></i> Todos os serviços estão concluídos. O carro pode estar pronto para entrega.</div>
+          <button className="btn-primary btn-sm" onClick={async () => {
+            try { await api(`/api/v1/os/${jo.id}/mark-ready`, { method: 'POST' }); load(); say('ok', 'Carro marcado como pronto.') }
+            catch (e: any) { say('err', e?.message || 'Não foi possível marcar como pronto.') }
+          }}>Marcar como pronto</button>
+        </div>
+      )}
 
       <div className="os-responsible">
         <i className="ti ti-user-star" aria-hidden="true"></i>

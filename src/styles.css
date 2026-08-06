@@ -1052,3 +1052,13 @@ textarea { resize: vertical; line-height: 1.55; }
 .swp-add-label { font-size: 11.5px; color: var(--ink-3); font-weight: 600; }
 .swp-add-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
 .swp-add-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; padding: 5px 10px; border: 1.5px solid var(--brand-border); border-radius: 14px; background: var(--s1); color: var(--brand-dark); cursor: pointer; }
+
+/* Progresso dos serviços no topo da OS */
+.os-progress { margin-top: 12px; }
+.os-progress-bar { height: 7px; background: var(--line); border-radius: 4px; overflow: hidden; }
+.os-progress-fill { height: 100%; background: #15803D; border-radius: 4px; transition: width 0.3s; }
+.os-progress-txt { font-size: 12.5px; color: var(--ink-2); margin-top: 6px; }
+.os-progress-wait { color: #B45309; font-weight: 600; }
+.os-ready-hint { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding: 12px 14px; background: #DCFCE7; border: 1px solid #86EFAC; border-radius: 10px; }
+.os-ready-hint > div { font-size: 13px; font-weight: 600; color: #15803D; display: flex; align-items: center; gap: 7px; }
+.os-ready-hint i { font-size: 17px; }
