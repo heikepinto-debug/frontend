@@ -2393,6 +2393,98 @@ function CompleteEntry({ joId, onBack, onDone }: { joId: string; onBack: () => v
 // Primeira peça do painel de gestão: a oficina cria, edita e
 // desactiva os seus tipos de serviço. Vem com base semeada, mas
 // nada fixo. Desactivar não apaga — o histórico mantém-se.
+// ── Acompanhamentos de um tipo de serviço ────────────────────
+// O que costuma vir com o serviço: relacionados, materiais,
+// consumíveis. Só o dono (pricing:manage) põe preço; o custo e o
+// resto qualquer um com config gere. É sempre sugestão no uso.
+const KIND_LBL: any = { service: 'Serviço relacionado', material: 'Material', consumable: 'Consumível' }
+const KIND_ICON: any = { service: 'ti-tool', material: 'ti-droplet', consumable: 'ti-spray' }
+
+function Accompaniments({ typeId, typeName, say }: { typeId: string; typeName: string; say: (k: 'err' | 'ok', t: string) => void }) {
+  const [rows, setRows] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [novo, setNovo] = useState<any>(null)
+  const [busy, setBusy] = useState(false)
+  const podePreco = useSession(s => s.can)('pricing:manage')
+
+  const load = () => {
+    setLoading(true)
+    api(`/api/v1/service-types/${typeId}/accompaniments`).then(r => setRows(r.data || [])).catch(() => {}).finally(() => setLoading(false))
+  }
+  useEffect(load, [typeId])
+
+  const criar = async () => {
+    if (!novo || novo.label.trim().length < 1) return
+    setBusy(true)
+    try {
+      await api(`/api/v1/service-types/${typeId}/accompaniments`, { method: 'POST', body: JSON.stringify({
+        kind: novo.kind, label: novo.label.trim(),
+        defaultQty: novo.defaultQty ? parseFloat(novo.defaultQty) : null,
+        unit: novo.unit || null,
+        defaultPrice: novo.defaultPrice ? parseFloat(novo.defaultPrice) : null,
+      }) })
+      setNovo(null); load()
+    } catch (e: any) { say('err', e?.message || 'Não foi possível guardar.') }
+    finally { setBusy(false) }
+  }
+  const remover = async (aid: string) => {
+    try { await api(`/api/v1/service-types/accompaniments/${aid}`, { method: 'PATCH', body: JSON.stringify({ active: false }) }); load() }
+    catch { say('err', 'Não foi possível remover.') }
+  }
+
+  return (
+    <div className="accomp">
+      <div className="accomp-head">O que costuma vir com “{typeName}”</div>
+      <p className="accomp-hint">Isto é lembrado quando se adiciona o serviço a um carro — sempre por confirmação.</p>
+
+      {loading && <p className="hint">A carregar…</p>}
+      {!loading && rows.length === 0 && !novo && <p className="hint">Ainda nada. Acrescenta o que costuma acompanhar este serviço.</p>}
+
+      {rows.map((r: any) => (
+        <div key={r.id} className="accomp-row">
+          <i className={`ti ${KIND_ICON[r.kind]}`} aria-hidden="true"></i>
+          <div className="accomp-info">
+            <div className="accomp-label">{r.label}
+              {r.default_qty && <span className="accomp-qty">{r.default_qty}{r.unit ? ` ${r.unit}` : ''}</span>}
+            </div>
+            <div className="accomp-meta">{KIND_LBL[r.kind]}{r.default_price != null ? ` · ${r.default_price} MT` : ''}</div>
+          </div>
+          <button className="mdl-edit" onClick={() => remover(r.id)} title="Remover"><i className="ti ti-x" aria-hidden="true"></i></button>
+        </div>
+      ))}
+
+      {novo ? (
+        <div className="accomp-form">
+          <div className="seg-row" style={{ marginBottom: 8 }}>
+            {['service', 'material', 'consumable'].map(k => (
+              <button key={k} className={`seg ${novo.kind === k ? 'on' : ''}`} onClick={() => setNovo({ ...novo, kind: k })}>{KIND_LBL[k]}</button>
+            ))}
+          </div>
+          <input placeholder={novo.kind === 'consumable' ? 'ex: Consumíveis diversos' : novo.kind === 'material' ? 'ex: Líquido de refrigeração' : 'ex: Mudança de óleo'}
+            value={novo.label} onChange={e => setNovo({ ...novo, label: e.target.value })} autoFocus />
+          {novo.kind === 'material' && (
+            <div className="accomp-form-row">
+              <input type="number" inputMode="decimal" placeholder="qtd" value={novo.defaultQty || ''} onChange={e => setNovo({ ...novo, defaultQty: e.target.value })} style={{ flex: 1 }} />
+              <input placeholder="unidade (L, un)" value={novo.unit || ''} onChange={e => setNovo({ ...novo, unit: e.target.value })} style={{ flex: 1 }} />
+            </div>
+          )}
+          {podePreco && (
+            <input type="number" inputMode="decimal" placeholder="preço ao cliente (MT) — opcional" value={novo.defaultPrice || ''} onChange={e => setNovo({ ...novo, defaultPrice: e.target.value })} style={{ marginTop: 8 }} />
+          )}
+          <div className="wf-nav" style={{ marginTop: 10 }}>
+            <button className="btn-ghost btn-sm" onClick={() => setNovo(null)}>Cancelar</button>
+            <button className="btn-primary btn-sm" disabled={busy || novo.label.trim().length < 1} onClick={criar}>Acrescentar</button>
+          </div>
+        </div>
+      ) : (
+        <button className="accomp-add" onClick={() => setNovo({ kind: 'material', label: '', defaultQty: '', unit: '', defaultPrice: '' })}>
+          <i className="ti ti-plus" aria-hidden="true"></i> Acrescentar
+        </button>
+      )}
+    </div>
+  )
+}
+
 function ServiceTypes({ onBack }: { onBack: () => void }) {
   const [types, setTypes] = useState<any[]>([])
   const [editing, setEditing] = useState<any>(null)   // tipo a editar, ou {} para novo
@@ -2401,6 +2493,7 @@ function ServiceTypes({ onBack }: { onBack: () => void }) {
   const [allowQuick, setAllowQuick] = useState(false)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
+  const [accompFor, setAccompFor] = useState<string | null>(null)
 
   const load = () => api('/api/v1/service-types?all=1').then(r => setTypes(r.data || [])).catch(() => {})
   useEffect(() => { load() }, [])
@@ -2472,16 +2565,22 @@ function ServiceTypes({ onBack }: { onBack: () => void }) {
 
           <div className="stype-list">
             {types.map(t => (
-              <div key={t.id} className={`stype-row ${!t.active ? 'off' : ''}`}>
+              <div key={t.id} className={`stype-row-wrap ${!t.active ? 'off' : ''}`}>
+                <div className="stype-row">
                 <div className="stype-main" onClick={() => openEdit(t)}>
                   <div className="stype-name">{t.name}{!t.active && <span className="stype-off-tag">desactivado</span>}</div>
                   <div className="stype-sub">Por omissão: {t.client_presence === 'waits' ? 'cliente espera' : 'deixa o carro'}{t.allows_quick_entry ? ' · permite rápida' : ' · entrada completa'}</div>
                 </div>
+                <button className="btn-ghost btn-sm" onClick={() => setAccompFor(accompFor === t.id ? null : t.id)} title="O que costuma vir com este serviço">
+                  <i className="ti ti-list-details" aria-hidden="true"></i>
+                </button>
                 <button className="btn-ghost btn-sm" onClick={() => toggleActive(t)} title={t.active ? 'Desactivar' : 'Reactivar'}>
                   <i className={`ti ${t.active ? 'ti-eye-off' : 'ti-eye'}`} aria-hidden="true"></i>
                 </button>
-              </div>
-            ))}
+                </div>
+              {accompFor === t.id && <Accompaniments typeId={t.id} typeName={t.name} say={(k, tx) => setMsg({ kind: k, text: tx })} />}
+            </div>
+          ))}
           </div>
         </>
       )}

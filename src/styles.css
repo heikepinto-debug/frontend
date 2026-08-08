@@ -1062,3 +1062,23 @@ textarea { resize: vertical; line-height: 1.55; }
 .os-ready-hint { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding: 12px 14px; background: #DCFCE7; border: 1px solid #86EFAC; border-radius: 10px; }
 .os-ready-hint > div { font-size: 13px; font-weight: 600; color: #15803D; display: flex; align-items: center; gap: 7px; }
 .os-ready-hint i { font-size: 17px; }
+
+/* Acompanhamentos de tipo de serviço */
+.accomp { margin: 4px 0 10px; padding: 12px 14px; background: var(--s2); border-radius: 10px; }
+.accomp-head { font-size: 13.5px; font-weight: 700; color: var(--ink); }
+.accomp-hint { font-size: 11.5px; color: var(--ink-3); margin: 3px 0 10px; }
+.accomp-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.accomp-row:first-of-type { border-top: none; }
+.accomp-row > i { color: var(--brand); font-size: 17px; }
+.accomp-info { flex: 1; }
+.accomp-label { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.accomp-qty { font-size: 11.5px; font-weight: 600; color: var(--brand-dark); background: var(--brand-bg); padding: 1px 7px; border-radius: 8px; margin-left: 7px; }
+.accomp-meta { font-size: 11.5px; color: var(--ink-3); margin-top: 1px; }
+.accomp-form { margin-top: 10px; padding: 10px; background: var(--s1); border: 1px solid var(--brand-border); border-radius: 9px; }
+.accomp-form input { width: 100%; box-sizing: border-box; }
+.accomp-form-row { display: flex; gap: 8px; margin-top: 8px; }
+.accomp-add { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--brand-dark); background: none; border: 1.5px dashed var(--brand-border); border-radius: 8px; padding: 7px 12px; cursor: pointer; margin-top: 8px; }
+.stype-row-wrap { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--s1); margin-bottom: 8px; overflow: hidden; }
+.stype-row-wrap.off { opacity: 0.6; }
+.stype-row-wrap .stype-row { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border: none; background: none; margin: 0; }
+.stype-row-wrap .accomp { margin: 0 10px 10px; }
