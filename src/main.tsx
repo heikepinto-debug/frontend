@@ -102,17 +102,18 @@ function Shell() {
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
   const [temUpdate, setTemUpdate] = useState(false)   // há versão nova à espera
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates' | 'ppi-model' | 'suppliers'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates' | 'ppi-model' | 'suppliers' | 'qcqueue'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
   const [ppiJoId, setPpiJoId] = useState<string | null>(null)
   const [ppiReturnTo, setPpiReturnTo] = useState<'list' | 'ppi-list'>('list')
-  const [osReturnTo, setOsReturnTo] = useState<'list' | 'authorizations' | 'detail'>('list')
+  const [osReturnTo, setOsReturnTo] = useState<'list' | 'authorizations' | 'detail' | 'qcqueue'>('list')
   const [signId, setSignId] = useState<string | undefined>(undefined)
   const [completeId, setCompleteId] = useState<string | undefined>(undefined)
   const [bookingCount, setBookingCount] = useState(0)
   const [authCount, setAuthCount] = useState(0)
+  const [qcCount, setQcCount] = useState(0)
   const isOwner = canDo('jobdelete:any')
 
   useEffect(() => {
@@ -160,6 +161,7 @@ function Shell() {
         setBookingCount(relevant.length)
       }).catch(() => {})
       api('/api/v1/os/awaiting-authorization').then(r => setAuthCount((r.data || []).length)).catch(() => {})
+      api('/api/v1/os/awaiting-qc').then(r => setQcCount((r.data || []).length)).catch(() => {})
       api('/api/v1/dashboard/summary').then(setSummary).catch(() => {})
     }
   }, [view])
@@ -173,6 +175,7 @@ function Shell() {
     canDo('reception:read') && nav('list', 'Recepções', 'ti-list-details', summary?.inShop),
     canDo('reception:read') && nav('ppi-list', 'Inspeções PPI', 'ti-clipboard-list'),
     authCount > 0 && nav('authorizations', 'Autorizações', 'ti-clipboard-check', authCount, true),
+    qcCount > 0 && nav('qcqueue', 'Controlo de qualidade', 'ti-shield', qcCount, true),
     canDo('reception:create') && nav('bookings', 'Marcações', 'ti-calendar-event', bookingCount || undefined, bookingCount > 0),
     nav('tasks', 'Tarefas', 'ti-checklist'),
     canDo('config:manage') && nav('servicetypes', 'Tipos de serviço', 'ti-tool'),
@@ -336,6 +339,7 @@ function Shell() {
       {view === 'updates' && <UpdatesPage onBack={() => setView('home')} />}
       {view === 'ppi-model' && <PPIModel onBack={() => setView('home')} />}
       {view === 'suppliers' && <SuppliersPage onBack={() => setView('home')} />}
+      {view === 'qcqueue' && <QCQueue onBack={() => setView('home')} onOpen={(id) => { setOsId(id); setOsReturnTo('qcqueue'); setView('os') }} />}
       {view === 'ppi-list' && <PPIList onBack={() => setView('home')} onOpen={(joId: string) => { setPpiJoId(joId); setPpiReturnTo('ppi-list'); setView('ppi') }} />}
       {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
         onOpenPPI={(id: string) => { setPpiJoId(id); setPpiReturnTo('list'); setView('ppi') }}
@@ -3797,6 +3801,42 @@ function Authorizations({ onBack, onOpen }: { onBack: () => void; onOpen: (id: s
   )
 }
 
+// ── FILA DE QC (carros prontos à espera de controlo de qualidade) ─
+function QCQueue({ onBack, onOpen }: { onBack: () => void; onOpen: (id: string) => void }) {
+  const [list, setList] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    api('/api/v1/os/awaiting-qc').then(r => setList(r.data || [])).catch(() => {}).finally(() => setLoading(false))
+  }, [])
+  const fmt = (s: string) => s ? new Date(s).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''
+
+  return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
+        <h2 style={{ margin: 0, fontSize: 20 }}>Controlo de qualidade</h2><span />
+      </div>
+      <p className="hint" style={{ marginBottom: 14 }}>Carros prontos à espera do controlo de qualidade de saída. Nenhum pode ser entregue sem o QC aprovado.</p>
+      {loading ? <p className="empty">A carregar…</p> : list.length === 0 ? (
+        <p className="empty">Nenhum carro à espera de QC.</p>
+      ) : (
+        <div className="prob-list">
+          {list.map(o => (
+            <button key={o.id} className="auth-row" onClick={() => onOpen(o.id)}>
+              <div className="auth-main">
+                <div className="auth-veh">{o.brand} {o.model} · {o.plate}</div>
+                <div className="auth-sub">{o.customer_name} · OS {o.number}</div>
+                <div className="auth-meta">Pronto {o.updated_at ? `desde ${fmt(o.updated_at)}` : ''}{o.qc_status === 'rejected' ? ' · QC reprovado, a corrigir' : ''}</div>
+              </div>
+              <i className="ti ti-shield auth-arrow" aria-hidden="true"></i>
+            </button>
+          ))}
+        </div>
+      )}
+    </main>
+  )
+}
+
 // ── MARCAÇÕES ────────────────────────────────────────────────
 const CANCEL_REASONS = [
   'O cliente adiou (sem data definida)',
@@ -4044,9 +4084,19 @@ function QCPanel({ joId, say, onDelivered }: { joId: string; say: (k: 'err' | 'o
     catch (e: any) { say('err', e?.message || 'Erro.') }
     finally { setBusy(false) }
   }
+  const [delivering, setDelivering] = useState(false)
+  const [sigData, setSigData] = useState<string | null>(null)
+  const [receiver, setReceiver] = useState('')
+
   const entregar = async () => {
     setBusy(true)
-    try { await api(`/api/v1/receptions/${joId}/status`, { method: 'POST', body: JSON.stringify({ status: 'delivered' }) }); say('ok', 'Carro entregue.'); onDelivered() }
+    try {
+      await api(`/api/v1/receptions/${joId}/deliver`, { method: 'POST', body: JSON.stringify({
+        signatureBase64: sigData || null,
+        receiverName: receiver.trim() || null,
+      }) })
+      say('ok', 'Carro entregue.'); onDelivered()
+    }
     catch (e: any) { say('err', e?.message || 'Não foi possível entregar.') }
     finally { setBusy(false) }
   }
@@ -4110,10 +4160,26 @@ function QCPanel({ joId, say, onDelivered }: { joId: string; say: (k: 'err' | 'o
             </>
           )}
 
-          {aprovado && (
-            <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 12 }} disabled={busy} onClick={entregar}>
+          {aprovado && !delivering && (
+            <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 12 }} onClick={() => setDelivering(true)}>
               <i className="ti ti-key" aria-hidden="true"></i> Entregar ao cliente
             </button>
+          )}
+          {aprovado && delivering && (
+            <div className="qc-deliver">
+              <div className="qc-sec-title" style={{ marginTop: 4 }}>Entrega</div>
+              <label className="fl">Quem levanta o carro (se não for o cliente)</label>
+              <input value={receiver} onChange={e => setReceiver(e.target.value)} placeholder="opcional — nome de quem recebe" />
+              <label className="fl" style={{ marginTop: 12 }}>Assinatura do cliente <span className="opt-tag">opcional</span></label>
+              <p className="hint" style={{ marginTop: 2, marginBottom: 8 }}>Se o cliente estiver presente, pode assinar a confirmar que recebeu o carro conforme. Se não, entrega-se na mesma.</p>
+              <SignaturePad onChange={setSigData} />
+              <div className="wf-nav" style={{ marginTop: 12 }}>
+                <button className="btn-ghost" onClick={() => { setDelivering(false); setSigData(null); setReceiver('') }}>Voltar</button>
+                <button className="btn-primary" disabled={busy} onClick={entregar}>
+                  {sigData ? 'Entregar com assinatura' : 'Entregar sem assinatura'}
+                </button>
+              </div>
+            </div>
           )}
         </div>
       )}
