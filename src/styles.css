@@ -1082,3 +1082,26 @@ textarea { resize: vertical; line-height: 1.55; }
 .stype-row-wrap.off { opacity: 0.6; }
 .stype-row-wrap .stype-row { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border: none; background: none; margin: 0; }
 .stype-row-wrap .accomp { margin: 0 10px 10px; }
+
+/* QC de saída */
+.qc-panel { margin-top: 14px; border: 1.5px solid var(--line); border-radius: 12px; overflow: hidden; }
+.qc-panel.ok { border-color: #86EFAC; }
+.qc-toggle { display: flex; align-items: center; gap: 9px; width: 100%; padding: 13px 15px; background: var(--s2); border: none; cursor: pointer; text-align: left; }
+.qc-toggle > i:first-child { font-size: 19px; color: var(--brand); }
+.qc-toggle span:nth-child(2) { flex: 1; font-size: 14.5px; font-weight: 700; color: var(--ink); }
+.qc-badge { font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 9px; }
+.qc-badge.ok { background: #DCFCE7; color: #15803D; }
+.qc-badge.no { background: #FEE2E2; color: #B91C1C; }
+.qc-badge.pend { background: #FEF3C7; color: #B45309; }
+.qc-body { padding: 14px 15px; }
+.qc-sec-title { font-size: 12px; font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.4px; margin: 14px 0 8px; }
+.qc-sec-title:first-of-type { margin-top: 4px; }
+.qc-item { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 9px 0; background: none; border: none; border-bottom: 1px solid var(--line); cursor: pointer; text-align: left; }
+.qc-box { flex-shrink: 0; width: 22px; height: 22px; border: 2px solid var(--line); border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #fff; margin-top: 1px; }
+.qc-item.on .qc-box { background: #15803D; border-color: #15803D; }
+.qc-label { font-size: 13.5px; color: var(--ink); line-height: 1.4; }
+.qc-req { font-size: 10px; font-weight: 700; color: #B45309; margin-left: 6px; }
+.qc-warn { font-size: 12.5px; color: #B45309; background: #FEF3C7; padding: 8px 11px; border-radius: 8px; margin-top: 12px; }
+.qc-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.qc-approved-note { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: #15803D; background: #DCFCE7; padding: 9px 12px; border-radius: 8px; margin-bottom: 12px; }
+.qc-reject-note { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: #B91C1C; background: #FEF2F2; padding: 9px 12px; border-radius: 8px; margin-bottom: 12px; }

@@ -4007,6 +4007,120 @@ const svcClass = (s: string) =>
 const PEDE_MOTIVO = ['awaiting_part', 'on_hold', 'not_done', 'awaiting_diagnosis']
 const ORDEM: Record<string, number> = { awaiting_diagnosis: 0, pending: 1, in_progress: 2, awaiting_approval: 3, awaiting_part: 3, on_hold: 3, done: 4, not_done: 4 }
 
+// ── QC de saída — checklist antes da entrega ─────────────────
+// Fecha o buraco que deixou um carro sair sem controlo. Não se
+// entrega sem QC aprovado (imposto também no backend).
+function QCPanel({ joId, say, onDelivered }: { joId: string; say: (k: 'err' | 'ok', t: string) => void; onDelivered: () => void }) {
+  const [data, setData] = useState<any>(null)
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [rejecting, setRejecting] = useState(false)
+  const [rejReason, setRejReason] = useState('')
+
+  const load = () => api(`/api/v1/os/${joId}/qc`).then(setData).catch(() => {})
+  useEffect(() => { if (open && !data) load() }, [open])
+
+  const aprovado = data?.check?.status === 'approved'
+  const reprovado = data?.check?.status === 'rejected'
+  const tecnicos = (data?.items || []).filter((i: any) => i.section === 'technical')
+  const cliente = (data?.items || []).filter((i: any) => i.section === 'with_client')
+  const obrigFaltam = (data?.items || []).filter((i: any) => i.required && !i.answer?.checked).length
+
+  const marcar = async (itemId: string, checked: boolean) => {
+    // otimista
+    setData((d: any) => ({ ...d, items: d.items.map((i: any) => i.id === itemId ? { ...i, answer: { ...i.answer, checked } } : i) }))
+    try { await api(`/api/v1/os/${joId}/qc/item`, { method: 'POST', body: JSON.stringify({ itemId, checked }) }) }
+    catch (e: any) { say('err', 'Não guardou; tente de novo.'); load() }
+  }
+  const aprovar = async () => {
+    setBusy(true)
+    try { await api(`/api/v1/os/${joId}/qc/approve`, { method: 'POST' }); await load(); say('ok', 'QC aprovado. O carro pode ser entregue.') }
+    catch (e: any) { say('err', e?.message || 'Faltam verificações obrigatórias.') }
+    finally { setBusy(false) }
+  }
+  const reprovar = async () => {
+    setBusy(true)
+    try { await api(`/api/v1/os/${joId}/qc/reject`, { method: 'POST', body: JSON.stringify({ reason: rejReason }) }); setRejecting(false); setRejReason(''); await load(); say('ok', 'QC reprovado — volta para correção.') }
+    catch (e: any) { say('err', e?.message || 'Erro.') }
+    finally { setBusy(false) }
+  }
+  const entregar = async () => {
+    setBusy(true)
+    try { await api(`/api/v1/receptions/${joId}/status`, { method: 'POST', body: JSON.stringify({ status: 'delivered' }) }); say('ok', 'Carro entregue.'); onDelivered() }
+    catch (e: any) { say('err', e?.message || 'Não foi possível entregar.') }
+    finally { setBusy(false) }
+  }
+
+  const Item = ({ it }: { it: any }) => (
+    <button className={`qc-item ${it.answer?.checked ? 'on' : ''}`} onClick={() => marcar(it.id, !it.answer?.checked)} disabled={aprovado}>
+      <span className="qc-box">{it.answer?.checked && <i className="ti ti-check" aria-hidden="true"></i>}</span>
+      <span className="qc-label">{it.label}{it.required && <span className="qc-req">obrig.</span>}</span>
+    </button>
+  )
+
+  return (
+    <div className={`qc-panel ${aprovado ? 'ok' : ''}`}>
+      <button className="qc-toggle" onClick={() => setOpen(!open)}>
+        <i className={`ti ${aprovado ? 'ti-shield-check' : 'ti-shield'}`} aria-hidden="true"></i>
+        <span>Controlo de qualidade de saída</span>
+        {aprovado ? <span className="qc-badge ok">Aprovado</span>
+          : reprovado ? <span className="qc-badge no">Reprovado</span>
+          : <span className="qc-badge pend">Por fazer</span>}
+        <i className={`ti ti-chevron-${open ? 'up' : 'down'}`} aria-hidden="true"></i>
+      </button>
+
+      {open && data && (
+        <div className="qc-body">
+          {aprovado && (
+            <div className="qc-approved-note">
+              <i className="ti ti-circle-check" aria-hidden="true"></i>
+              Aprovado por {data.check.approved_by_name || '—'}{data.check.approved_at ? ` · ${new Date(data.check.approved_at).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}
+            </div>
+          )}
+          {reprovado && data.check.reject_reason && (
+            <div className="qc-reject-note"><i className="ti ti-alert-triangle" aria-hidden="true"></i> Reprovado: {data.check.reject_reason}</div>
+          )}
+
+          <div className="qc-sec-title">Verificações técnicas</div>
+          {tecnicos.map((it: any) => <Item key={it.id} it={it} />)}
+
+          <div className="qc-sec-title">À frente do cliente</div>
+          {cliente.map((it: any) => <Item key={it.id} it={it} />)}
+
+          {!aprovado && (
+            <>
+              {obrigFaltam > 0 && <p className="qc-warn">Faltam {obrigFaltam} {obrigFaltam === 1 ? 'verificação obrigatória' : 'verificações obrigatórias'} para aprovar.</p>}
+              <div className="qc-actions">
+                {!rejecting ? (
+                  <>
+                    <button className="btn-ghost btn-sm" onClick={() => setRejecting(true)}>Reprovar</button>
+                    <button className="btn-primary" disabled={busy || obrigFaltam > 0} onClick={aprovar}>Aprovar QC</button>
+                  </>
+                ) : (
+                  <div style={{ width: '100%' }}>
+                    <label className="fl">Motivo da reprovação</label>
+                    <textarea rows={2} value={rejReason} onChange={e => setRejReason(e.target.value)} placeholder="o que está mal e volta para corrigir" />
+                    <div className="wf-nav" style={{ marginTop: 8 }}>
+                      <button className="btn-ghost btn-sm" onClick={() => setRejecting(false)}>Cancelar</button>
+                      <button className="btn-primary btn-sm" disabled={busy || rejReason.trim().length < 2} onClick={reprovar}>Confirmar reprovação</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {aprovado && (
+            <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 12 }} disabled={busy} onClick={entregar}>
+              <i className="ti ti-key" aria-hidden="true"></i> Entregar ao cliente
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ServiceRow({ svc, onChanged, say, team, responsibleId }: { svc: any; onChanged: () => void; say: (k: 'err' | 'ok', t: string) => void; team: any[]; responsibleId?: string | null }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -4476,6 +4590,10 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
           {(data?.team || []).map((m: any) => <option key={m.id} value={m.id}>{m.full_name}</option>)}
         </select>
       </div>
+
+      {['ready', 'quality_check'].includes(jo.status) && (
+        <QCPanel joId={jo.id} say={say} onDelivered={load} />
+      )}
 
       {jo.diag_rejected_note && isDiag && (
         <div className="os-reject-note"><i className="ti ti-alert-triangle" aria-hidden="true"></i> Diagnóstico devolvido: {jo.diag_rejected_note}</div>
