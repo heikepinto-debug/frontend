@@ -1183,3 +1183,10 @@ textarea { resize: vertical; line-height: 1.55; }
 .budget-drow.tot .bd-dept, .budget-drow.tot .bd-col.margin { font-weight: 800; font-size: 14px; }
 .budget-client { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding-top: 8px; font-size: 13px; color: var(--ink-2); }
 .budget-client-val { font-weight: 700; color: var(--brand-dark); }
+
+/* Validação de custos */
+.svc-costs-pend { font-size: 10.5px; font-weight: 700; color: #B45309; background: #FEF3C7; padding: 1px 8px; border-radius: 8px; margin-left: 8px; }
+.svc-cost-row.unvalidated { background: #FFFDF5; }
+.svc-cost-pend-tag { font-size: 10px; font-weight: 700; color: #B45309; margin-left: 7px; }
+.svc-cost-ok { background: #FEF3C7; border: 1.5px solid #FCD34D; color: #B45309; border-radius: 7px; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+.svc-cost-okd { background: none; border: none; color: #15803D; cursor: pointer; font-size: 18px; flex-shrink: 0; }

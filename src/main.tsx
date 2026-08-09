@@ -4331,6 +4331,7 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId }: { svc: any; on
   const [showWorkers, setShowWorkers] = useState(false)
   const podeFinance = useSession(s => s.can)('finance:read')
   const podePreco = useSession(s => s.can)('pricing:manage')
+  const podeCusto = useSession(s => s.can)('cost:register')
   const [depts, setDepts] = useState<any[]>([])
   useEffect(() => { if (podePreco) api('/api/v1/departments').then(r => setDepts(r.data || [])).catch(() => {}) }, [podePreco])
 
@@ -4567,15 +4568,19 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId }: { svc: any; on
               </select>
             </div>
           </div>
-          <ServiceCosts svcId={svc.id} depts={depts} ownerDeptId={svc.department_id} say={say} onChanged={onChanged} />
         </div>
+      )}
+      {podeCusto && (
+        <ServiceCosts svcId={svc.id} depts={depts} ownerDeptId={svc.department_id} podeGestao={podePreco} say={say} onChanged={onChanged} />
       )}
     </div>
   )
 }
 
-// ── Custos de um serviço, com fornecimento interno em cascata ─
-function ServiceCosts({ svcId, depts, ownerDeptId, say, onChanged }: { svcId: string; depts: any[]; ownerDeptId?: string | null; say: (k: 'err' | 'ok', t: string) => void; onChanged: () => void }) {
+// ── Custos de um serviço ─────────────────────────────────────
+// Quem tem cost:register lança custos simples (Yury). Só a gestão
+// (podeGestao) vê/usa a cascata de fornecimento interno e valida.
+function ServiceCosts({ svcId, depts, ownerDeptId, podeGestao, say, onChanged }: { svcId: string; depts: any[]; ownerDeptId?: string | null; podeGestao: boolean; say: (k: 'err' | 'ok', t: string) => void; onChanged: () => void }) {
   const [costs, setCosts] = useState<any[]>([])
   const [novo, setNovo] = useState<any>(null)
   const [busy, setBusy] = useState(false)
@@ -4591,43 +4596,59 @@ function ServiceCosts({ svcId, depts, ownerDeptId, say, onChanged }: { svcId: st
     try {
       await api(`/api/v1/os/services/${svcId}/costs`, { method: 'POST', body: JSON.stringify({
         category: novo.category, label: novo.label.trim(), amount: parseFloat(novo.amount),
-        supplierDepartmentId: novo.supplierDepartmentId || null,
+        supplierDepartmentId: podeGestao ? (novo.supplierDepartmentId || null) : null,
       }) })
       setNovo(null); load(); onChanged()
     } catch (e: any) { say('err', e?.message || 'Não guardou.') }
     finally { setBusy(false) }
   }
-  const remover = async (cid: string) => { try { await api(`/api/v1/os/costs/${cid}`, { method: 'DELETE' }); load(); onChanged() } catch { say('err', 'Não removeu.') } }
+  const remover = async (cid: string) => { try { await api(`/api/v1/os/costs/${cid}`, { method: 'DELETE' }); load(); onChanged() } catch (e: any) { say('err', e?.message || 'Não removeu.') } }
+  const validar = async (cid: string, v: boolean) => { try { await api(`/api/v1/os/costs/${cid}/validate`, { method: 'POST', body: JSON.stringify({ validated: v }) }); load() } catch { say('err', 'Erro.') } }
+
+  const porValidar = costs.filter((c: any) => !c.validated).length
 
   return (
     <div className="svc-costs">
-      <div className="svc-costs-title">Custos deste serviço</div>
-      {costs.length === 0 && !novo && <p className="hint" style={{ margin: '4px 0' }}>Sem custos. Acrescenta mão de obra, material, ou um serviço de outro departamento.</p>}
+      <div className="svc-costs-title">
+        Custos deste serviço
+        {podeGestao && porValidar > 0 && <span className="svc-costs-pend">{porValidar} por validar</span>}
+      </div>
+      {costs.length === 0 && !novo && <p className="hint" style={{ margin: '4px 0' }}>Sem custos. Acrescenta o que compraste — mão de obra, material, peças.</p>}
       {costs.map((c: any) => (
-        <div key={c.id} className="svc-cost-row">
+        <div key={c.id} className={`svc-cost-row ${!c.validated ? 'unvalidated' : ''}`}>
           <div className="svc-cost-info">
-            <span className="svc-cost-label">{c.label}</span>
+            <span className="svc-cost-label">{c.label}
+              {!c.validated && <span className="svc-cost-pend-tag">por validar</span>}
+            </span>
             <span className="svc-cost-meta">{CAT[c.category]}{c.supplier_dept_name ? ` · fornecido por ${c.supplier_dept_name}` : ''}</span>
           </div>
           <span className="svc-cost-amt">{Number(c.amount).toLocaleString('pt-PT')} MT</span>
+          {podeGestao && !c.validated && (
+            <button className="svc-cost-ok" onClick={() => validar(c.id, true)} title="Validar"><i className="ti ti-check" aria-hidden="true"></i></button>
+          )}
+          {podeGestao && c.validated && (
+            <button className="svc-cost-okd" onClick={() => validar(c.id, false)} title="Validado — tocar para reverter"><i className="ti ti-circle-check" aria-hidden="true"></i></button>
+          )}
           <button className="mdl-edit" onClick={() => remover(c.id)}><i className="ti ti-x" aria-hidden="true"></i></button>
         </div>
       ))}
       {novo ? (
         <div className="svc-cost-form">
-          <select value={novo.category} onChange={e => setNovo({ ...novo, category: e.target.value, supplierDepartmentId: e.target.value === 'outsource' ? novo.supplierDepartmentId : '' })}>
+          <select value={novo.category} onChange={e => setNovo({ ...novo, category: e.target.value })}>
             {Object.keys(CAT).map(k => <option key={k} value={k}>{CAT[k]}</option>)}
           </select>
-          <input placeholder="descrição (ex: Mão de obra, DPF OFF)" value={novo.label} onChange={e => setNovo({ ...novo, label: e.target.value })} autoFocus />
+          <input placeholder="descrição (ex: Filtro de óleo, Mão de obra)" value={novo.label} onChange={e => setNovo({ ...novo, label: e.target.value })} autoFocus />
           <input type="number" inputMode="decimal" placeholder="custo MT" value={novo.amount} onChange={e => setNovo({ ...novo, amount: e.target.value })} />
-          <div className="svc-cost-internal">
-            <label className="fl">Fornecido por outro departamento? <span className="opt-tag">cascata</span></label>
-            <select value={novo.supplierDepartmentId || ''} onChange={e => setNovo({ ...novo, supplierDepartmentId: e.target.value })}>
-              <option value="">Não — é custo direto</option>
-              {depts.filter((d: any) => d.id !== ownerDeptId).map((d: any) => <option key={d.id} value={d.id}>Sim — dos {d.name}</option>)}
-            </select>
-            {novo.supplierDepartmentId && <p className="hint" style={{ marginTop: 4 }}>Este valor vira receita nesse departamento, onde poderá ter os seus próprios custos.</p>}
-          </div>
+          {podeGestao && (
+            <div className="svc-cost-internal">
+              <label className="fl">Fornecido por outro departamento? <span className="opt-tag">cascata</span></label>
+              <select value={novo.supplierDepartmentId || ''} onChange={e => setNovo({ ...novo, supplierDepartmentId: e.target.value })}>
+                <option value="">Não — é custo direto</option>
+                {depts.filter((d: any) => d.id !== ownerDeptId).map((d: any) => <option key={d.id} value={d.id}>Sim — dos {d.name}</option>)}
+              </select>
+              {novo.supplierDepartmentId && <p className="hint" style={{ marginTop: 4 }}>Este valor vira receita nesse departamento, onde poderá ter os seus próprios custos.</p>}
+            </div>
+          )}
           <div className="wf-nav" style={{ marginTop: 8 }}>
             <button className="btn-ghost btn-sm" onClick={() => setNovo(null)}>Cancelar</button>
             <button className="btn-primary btn-sm" disabled={busy || !novo.label.trim() || !novo.amount} onClick={criar}>Guardar custo</button>
