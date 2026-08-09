@@ -4115,6 +4115,7 @@ function QCPanel({ joId, say, onDelivered }: { joId: string; say: (k: 'err' | 'o
   const [busy, setBusy] = useState(false)
   const [rejecting, setRejecting] = useState(false)
   const [rejReason, setRejReason] = useState('')
+  const [respOk, setRespOk] = useState(false)
 
   const load = () => api(`/api/v1/os/${joId}/qc`).then(setData).catch(() => {})
   useEffect(() => { if (open && !data) load() }, [open])
@@ -4199,11 +4200,21 @@ function QCPanel({ joId, say, onDelivered }: { joId: string; say: (k: 'err' | 'o
           {!aprovado && (
             <>
               {obrigFaltam > 0 && <p className="qc-warn">Faltam {obrigFaltam} {obrigFaltam === 1 ? 'verificação obrigatória' : 'verificações obrigatórias'} para aprovar.</p>}
+              {!rejecting && (
+                <div className="qc-responsibility">
+                  <div className="qc-resp-title"><i className="ti ti-alert-triangle" aria-hidden="true"></i> Responsabilidade sobre o trabalho</div>
+                  <p>Este é o último ponto de verificação antes de o carro chegar ao cliente. Ao aprovar, confirmo que verifiquei o trabalho realizado, que o problema do cliente foi resolvido, que não há riscos de segurança evidentes, e que o carro está em condições de ser entregue. Assumo, no âmbito das minhas funções, a responsabilidade por esta verificação. Fica registado que fui eu a aprovar, com a data e a hora.</p>
+                  <button className={`chk ${respOk ? 'on' : ''}`} onClick={() => setRespOk(!respOk)}>
+                    <span className="chk-box">{respOk && <i className="ti ti-check" aria-hidden="true"></i>}</span>
+                    Li e assumo esta responsabilidade
+                  </button>
+                </div>
+              )}
               <div className="qc-actions">
                 {!rejecting ? (
                   <>
                     <button className="btn-ghost btn-sm" onClick={() => setRejecting(true)}>Reprovar</button>
-                    <button className="btn-primary" disabled={busy || obrigFaltam > 0} onClick={aprovar}>Aprovar QC</button>
+                    <button className="btn-primary" disabled={busy || obrigFaltam > 0 || !respOk} onClick={aprovar}>Aprovar QC</button>
                   </>
                 ) : (
                   <div style={{ width: '100%' }}>
