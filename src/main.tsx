@@ -150,7 +150,7 @@ function Shell() {
   useEffect(() => {
     api('/api/v1/updates/unseen')
       .then(r => { if ((r.updates || []).length) { setNovidades(r.updates); setNovPrimeira(!!r.primeiraVez) } })
-      .catch(() => {})
+      .catch(e => { console.warn('Não foi possível carregar as novidades:', e?.message || e) })
   }, [])
 
   useEffect(() => {
@@ -3012,12 +3012,63 @@ function PPIModel({ onBack }: { onBack: () => void }) {
 }
 
 // ── Fornecedores (lista simples, só dono) ────────────────────
+// ── Tabela de preços de um fornecedor ────────────────────────
+function SupplierPrices({ supplierId, say }: { supplierId: string; say: (k: 'err' | 'ok', t: string) => void }) {
+  const [rows, setRows] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [novo, setNovo] = useState<{ label: string; price: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const load = () => { setLoading(true); api(`/api/v1/suppliers/${supplierId}/prices`).then(r => setRows(r.prices || [])).catch(() => {}).finally(() => setLoading(false)) }
+  useEffect(load, [supplierId])
+
+  const criar = async () => {
+    if (!novo || novo.label.trim().length < 1 || !novo.price) return
+    setBusy(true)
+    try { await api(`/api/v1/suppliers/${supplierId}/prices`, { method: 'POST', body: JSON.stringify({ label: novo.label.trim(), price: parseFloat(novo.price) }) }); setNovo(null); load() }
+    catch (e: any) { say('err', e?.message || 'Não foi possível guardar.') }
+    finally { setBusy(false) }
+  }
+  const remover = async (pid: string) => {
+    try { await api(`/api/v1/suppliers/prices/${pid}`, { method: 'PATCH', body: JSON.stringify({ active: false }) }); load() }
+    catch { say('err', 'Não foi possível remover.') }
+  }
+
+  return (
+    <div className="supp-prices">
+      <div className="supp-prices-head">Preços habituais</div>
+      {loading ? <p className="hint">A carregar…</p> : rows.length === 0 && !novo ? (
+        <p className="hint">Sem preços definidos. Acrescenta o que este fornecedor costuma cobrar.</p>
+      ) : rows.map((p: any) => (
+        <div key={p.id} className="supp-price-row">
+          <span className="supp-price-label">{p.label}</span>
+          <span className="supp-price-val">{p.price} MT</span>
+          <button className="mdl-edit" onClick={() => remover(p.id)} title="Remover"><i className="ti ti-x" aria-hidden="true"></i></button>
+        </div>
+      ))}
+      {novo ? (
+        <div className="supp-price-form">
+          <input placeholder="trabalho (ex: Skim de discos)" value={novo.label} onChange={e => setNovo({ ...novo, label: e.target.value })} autoFocus />
+          <input type="number" inputMode="decimal" placeholder="preço MT" value={novo.price} onChange={e => setNovo({ ...novo, price: e.target.value })} />
+          <div className="wf-nav" style={{ marginTop: 8 }}>
+            <button className="btn-ghost btn-sm" onClick={() => setNovo(null)}>Cancelar</button>
+            <button className="btn-primary btn-sm" disabled={busy || !novo.label.trim() || !novo.price} onClick={criar}>Guardar</button>
+          </div>
+        </div>
+      ) : (
+        <button className="accomp-add" onClick={() => setNovo({ label: '', price: '' })}><i className="ti ti-plus" aria-hidden="true"></i> Acrescentar preço</button>
+      )}
+    </div>
+  )
+}
+
 function SuppliersPage({ onBack }: { onBack: () => void }) {
   const [rows, setRows] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
   const [novo, setNovo] = useState<{ name: string; contact: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [pricesFor, setPricesFor] = useState<string | null>(null)
 
   const carregar = () => {
     setLoading(true)
@@ -3052,9 +3103,15 @@ function SuppliersPage({ onBack }: { onBack: () => void }) {
       {!loading && rows.length === 0 && !novo && <p className="hint">Ainda não há fornecedores.</p>}
 
       {rows.map((s: any) => (
-        <div key={s.id} className="supp-row">
-          <div><div className="supp-name">{s.name}</div>{s.contact && <div className="supp-contact">{s.contact}</div>}</div>
-          <button className="mdl-edit" onClick={() => desativar(s.id)} title="Remover"><i className="ti ti-trash" aria-hidden="true"></i></button>
+        <div key={s.id} className="supp-row-wrap">
+          <div className="supp-row">
+            <div><div className="supp-name">{s.name}</div>{s.contact && <div className="supp-contact">{s.contact}</div>}</div>
+            <button className="btn-ghost btn-sm" onClick={() => setPricesFor(pricesFor === s.id ? null : s.id)} title="Tabela de preços">
+              <i className="ti ti-currency-dollar" aria-hidden="true"></i>
+            </button>
+            <button className="mdl-edit" onClick={() => desativar(s.id)} title="Remover"><i className="ti ti-trash" aria-hidden="true"></i></button>
+          </div>
+          {pricesFor === s.id && <SupplierPrices supplierId={s.id} say={(k, tx) => setMsg({ kind: k, text: tx })} />}
         </div>
       ))}
 
@@ -4265,6 +4322,12 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId }: { svc: any; on
   const [motivo, setMotivo] = useState('')
   const [outOpen, setOutOpen] = useState(false)
   const [suppliers, setSuppliers] = useState<any[]>([])
+  const [supplierPrices, setSupplierPrices] = useState<any[]>([])
+  useEffect(() => {
+    if (svc.supplier_id) {
+      api(`/api/v1/suppliers/${svc.supplier_id}/prices`).then(r => setSupplierPrices(r.prices || [])).catch(() => setSupplierPrices([]))
+    } else setSupplierPrices([])
+  }, [svc.supplier_id])
   const [showWorkers, setShowWorkers] = useState(false)
   const podeFinance = useSession(s => s.can)('finance:read')
 
@@ -4402,8 +4465,20 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId }: { svc: any; on
 
               {podeFinance && (
                 <>
+                  {svc.supplier_id && supplierPrices.length > 0 && (
+                    <div className="supp-price-sug">
+                      <span className="supp-price-sug-label">Preços habituais deste fornecedor:</span>
+                      <div className="supp-price-chips">
+                        {supplierPrices.map((p: any) => (
+                          <button key={p.id} className="supp-price-chip" onClick={() => gravarOut({ outsourced: true, cost: p.price })}>
+                            {p.label} · {p.price} MT
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <label className="fl" style={{ marginTop: 10 }}>Custo do fornecedor (MT) <span className="opt-tag">só contas</span></label>
-                  <input type="number" inputMode="decimal" defaultValue={svc.supplier_cost ?? ''}
+                  <input type="number" inputMode="decimal" key={svc.supplier_cost ?? 'empty'} defaultValue={svc.supplier_cost ?? ''}
                     placeholder="o que o fornecedor cobra"
                     onBlur={e => { const v = e.target.value === '' ? null : parseFloat(e.target.value); gravarOut({ outsourced: true, cost: v }) }} />
                 </>

@@ -1120,3 +1120,18 @@ textarea { resize: vertical; line-height: 1.55; }
 .qc-resp-title i { font-size: 16px; }
 .qc-responsibility p { font-size: 12.5px; line-height: 1.55; color: #78350F; margin: 0 0 10px; }
 .qc-responsibility .chk { width: 100%; justify-content: flex-start; font-weight: 600; color: #92400E; }
+
+/* Preços de fornecedor */
+.supp-row-wrap { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--s1); margin-bottom: 8px; overflow: hidden; }
+.supp-row-wrap .supp-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px; }
+.supp-prices { padding: 0 14px 14px; background: var(--s2); }
+.supp-prices-head { font-size: 12px; font-weight: 700; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.3px; padding: 10px 0 8px; }
+.supp-price-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); }
+.supp-price-label { flex: 1; font-size: 13.5px; color: var(--ink); }
+.supp-price-val { font-size: 13.5px; font-weight: 700; color: var(--brand-dark); }
+.supp-price-form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.supp-price-form input { width: 100%; box-sizing: border-box; }
+.supp-price-sug { margin-top: 10px; padding: 9px 11px; background: var(--brand-bg); border-radius: 8px; }
+.supp-price-sug-label { font-size: 11.5px; font-weight: 600; color: var(--brand-dark); }
+.supp-price-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.supp-price-chip { font-size: 12px; font-weight: 600; padding: 5px 10px; border: 1.5px solid var(--brand-border); border-radius: 14px; background: var(--s1); color: var(--brand-dark); cursor: pointer; }
