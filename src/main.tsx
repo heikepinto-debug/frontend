@@ -4330,6 +4330,9 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId }: { svc: any; on
   }, [svc.supplier_id])
   const [showWorkers, setShowWorkers] = useState(false)
   const podeFinance = useSession(s => s.can)('finance:read')
+  const podePreco = useSession(s => s.can)('pricing:manage')
+  const [depts, setDepts] = useState<any[]>([])
+  useEffect(() => { if (podePreco) api('/api/v1/departments').then(r => setDepts(r.data || [])).catch(() => {}) }, [podePreco])
 
   const OUT_LBL: any = { none: '', sent: 'Enviado ao fornecedor', at_supplier: 'No fornecedor', returned: 'Voltou do fornecedor' }
   const workers: any[] = svc.workers || []
@@ -4357,6 +4360,13 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId }: { svc: any; on
       onChanged()
     } catch (e: any) { say('err', e?.message || 'Não foi possível guardar.') }
     finally { setBusy(false) }
+  }
+
+  const gravarPreco = async (patch: any) => {
+    try {
+      await api(`/api/v1/os/services/${svc.id}/pricing`, { method: 'POST', body: JSON.stringify(patch) })
+      onChanged()
+    } catch (e: any) { say('err', e?.message || 'Não foi possível guardar o preço.') }
   }
 
   const mudar = async (novo: string, reason?: string) => {
@@ -4538,6 +4548,94 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId }: { svc: any; on
           ))}
         </div>
       )}
+
+      {podePreco && (
+        <div className="svc-pricing">
+          <div className="svc-pricing-title"><i className="ti ti-currency-dollar" aria-hidden="true"></i> Orçamento <span className="opt-tag">só gestão</span></div>
+          <div className="svc-pricing-row">
+            <div style={{ flex: 1 }}>
+              <label className="fl">Preço ao cliente (sem IVA)</label>
+              <input type="number" inputMode="decimal" key={svc.price ?? 'empty'} defaultValue={svc.price ?? ''}
+                placeholder="0 MT"
+                onBlur={e => { const v = e.target.value === '' ? null : parseFloat(e.target.value); gravarPreco({ price: v }) }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="fl">Departamento</label>
+              <select value={svc.department_id || ''} onChange={e => gravarPreco({ departmentId: e.target.value || null })}>
+                <option value="">— escolher —</option>
+                {depts.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <ServiceCosts svcId={svc.id} depts={depts} ownerDeptId={svc.department_id} say={say} onChanged={onChanged} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Custos de um serviço, com fornecimento interno em cascata ─
+function ServiceCosts({ svcId, depts, ownerDeptId, say, onChanged }: { svcId: string; depts: any[]; ownerDeptId?: string | null; say: (k: 'err' | 'ok', t: string) => void; onChanged: () => void }) {
+  const [costs, setCosts] = useState<any[]>([])
+  const [novo, setNovo] = useState<any>(null)
+  const [busy, setBusy] = useState(false)
+
+  const load = () => api(`/api/v1/os/services/${svcId}/costs`).then(r => setCosts(r.data || [])).catch(() => {})
+  useEffect(() => { load() }, [svcId])
+
+  const CAT: any = { labour: 'Mão de obra', material: 'Material', file: 'Ficheiro/software', outsource: 'Serviço externo', other: 'Outro' }
+
+  const criar = async () => {
+    if (!novo || !novo.label.trim() || !novo.amount) return
+    setBusy(true)
+    try {
+      await api(`/api/v1/os/services/${svcId}/costs`, { method: 'POST', body: JSON.stringify({
+        category: novo.category, label: novo.label.trim(), amount: parseFloat(novo.amount),
+        supplierDepartmentId: novo.supplierDepartmentId || null,
+      }) })
+      setNovo(null); load(); onChanged()
+    } catch (e: any) { say('err', e?.message || 'Não guardou.') }
+    finally { setBusy(false) }
+  }
+  const remover = async (cid: string) => { try { await api(`/api/v1/os/costs/${cid}`, { method: 'DELETE' }); load(); onChanged() } catch { say('err', 'Não removeu.') } }
+
+  return (
+    <div className="svc-costs">
+      <div className="svc-costs-title">Custos deste serviço</div>
+      {costs.length === 0 && !novo && <p className="hint" style={{ margin: '4px 0' }}>Sem custos. Acrescenta mão de obra, material, ou um serviço de outro departamento.</p>}
+      {costs.map((c: any) => (
+        <div key={c.id} className="svc-cost-row">
+          <div className="svc-cost-info">
+            <span className="svc-cost-label">{c.label}</span>
+            <span className="svc-cost-meta">{CAT[c.category]}{c.supplier_dept_name ? ` · fornecido por ${c.supplier_dept_name}` : ''}</span>
+          </div>
+          <span className="svc-cost-amt">{Number(c.amount).toLocaleString('pt-PT')} MT</span>
+          <button className="mdl-edit" onClick={() => remover(c.id)}><i className="ti ti-x" aria-hidden="true"></i></button>
+        </div>
+      ))}
+      {novo ? (
+        <div className="svc-cost-form">
+          <select value={novo.category} onChange={e => setNovo({ ...novo, category: e.target.value, supplierDepartmentId: e.target.value === 'outsource' ? novo.supplierDepartmentId : '' })}>
+            {Object.keys(CAT).map(k => <option key={k} value={k}>{CAT[k]}</option>)}
+          </select>
+          <input placeholder="descrição (ex: Mão de obra, DPF OFF)" value={novo.label} onChange={e => setNovo({ ...novo, label: e.target.value })} autoFocus />
+          <input type="number" inputMode="decimal" placeholder="custo MT" value={novo.amount} onChange={e => setNovo({ ...novo, amount: e.target.value })} />
+          <div className="svc-cost-internal">
+            <label className="fl">Fornecido por outro departamento? <span className="opt-tag">cascata</span></label>
+            <select value={novo.supplierDepartmentId || ''} onChange={e => setNovo({ ...novo, supplierDepartmentId: e.target.value })}>
+              <option value="">Não — é custo direto</option>
+              {depts.filter((d: any) => d.id !== ownerDeptId).map((d: any) => <option key={d.id} value={d.id}>Sim — dos {d.name}</option>)}
+            </select>
+            {novo.supplierDepartmentId && <p className="hint" style={{ marginTop: 4 }}>Este valor vira receita nesse departamento, onde poderá ter os seus próprios custos.</p>}
+          </div>
+          <div className="wf-nav" style={{ marginTop: 8 }}>
+            <button className="btn-ghost btn-sm" onClick={() => setNovo(null)}>Cancelar</button>
+            <button className="btn-primary btn-sm" disabled={busy || !novo.label.trim() || !novo.amount} onClick={criar}>Guardar custo</button>
+          </div>
+        </div>
+      ) : (
+        <button className="accomp-add" onClick={() => setNovo({ category: 'labour', label: '', amount: '', supplierDepartmentId: '' })}><i className="ti ti-plus" aria-hidden="true"></i> Acrescentar custo</button>
+      )}
     </div>
   )
 }
@@ -4552,6 +4650,8 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
   const [rejecting, setRejecting] = useState(false)
   const [rejectNote, setRejectNote] = useState('')
   const [photoView, setPhotoView] = useState<string | null>(null)
+  const [budget, setBudget] = useState<any>(null)
+  const podePreco = useSession(s => s.can)('pricing:manage')
 
   const [loadError, setLoadError] = useState<string | null>(null)
   const load = () => {
@@ -4563,6 +4663,8 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
     }).catch((e: any) => setLoadError(e?.message || 'Erro de ligação')).finally(() => setLoading(false))
   }
   useEffect(() => { load() }, [joId])
+  const loadBudget = () => { if (podePreco) api(`/api/v1/os/${joId}/budget`).then(setBudget).catch(() => {}) }
+  useEffect(() => { loadBudget() }, [joId, podePreco])
 
   const startOS = async () => {
     setStarting(true)
@@ -4814,9 +4916,39 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
       <div className="svc-list">
         {(data?.services || []).length === 0 && <p className="hint">Sem serviços registados.</p>}
         {(data?.services || []).map((s: any) => (
-          <ServiceRow key={s.id} svc={s} onChanged={load} say={say} team={data?.team || []} responsibleId={jo.responsible_id} />
+          <ServiceRow key={s.id} svc={s} onChanged={() => { load(); loadBudget() }} say={say} team={data?.team || []} responsibleId={jo.responsible_id} />
         ))}
       </div>
+
+      {podePreco && budget && (budget.precoCliente > 0 || (budget.porDepartamento || []).length > 0) && (
+        <div className="budget-box">
+          <div className="budget-title"><i className="ti ti-report-money" aria-hidden="true"></i> Margem por departamento</div>
+          <div className="budget-head-row">
+            <span className="bh-dept"></span>
+            <span className="bh-col">Receita</span>
+            <span className="bh-col">Custo</span>
+            <span className="bh-col">Margem</span>
+          </div>
+          {(budget.porDepartamento || []).map((d: any) => (
+            <div key={d.id} className="budget-drow">
+              <span className="bd-dept">{d.name}</span>
+              <span className="bd-col">{Number(d.receita).toLocaleString('pt-PT')}</span>
+              <span className="bd-col cost">{Number(d.custo).toLocaleString('pt-PT')}</span>
+              <span className={`bd-col margin ${d.margem < 0 ? 'neg' : ''}`}>{Number(d.margem).toLocaleString('pt-PT')}</span>
+            </div>
+          ))}
+          <div className="budget-drow tot">
+            <span className="bd-dept">Total</span>
+            <span className="bd-col"></span>
+            <span className="bd-col"></span>
+            <span className={`bd-col margin ${budget.margemTotal < 0 ? 'neg' : ''}`}>{Number(budget.margemTotal || 0).toLocaleString('pt-PT')}</span>
+          </div>
+          <div className="budget-client">
+            <span>O cliente paga (sem IVA)</span>
+            <span className="budget-client-val">{Number(budget.precoCliente || 0).toLocaleString('pt-PT')} MT</span>
+          </div>
+        </div>
+      )}
 
       <div className="det-section-title" style={{ marginTop: 18 }}>Lista de problemas</div>
       <div className="prob-list">
