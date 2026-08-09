@@ -528,6 +528,8 @@ function Reception({ onDone, onBack, resumeDraftId, onStartPPI }: { onDone: () =
   const [unitId, setUnitId] = useState('')
   const [serviceTypes, setServiceTypes] = useState<any[]>([])      // catálogo de tipos da oficina
   const [chosenServices, setChosenServices] = useState<any[]>([])  // serviços escolhidos p/ este carro
+  const [accompSug, setAccompSug] = useState<Record<string, any[]>>({})   // typeId -> acompanhamentos sugeridos
+  const [accompOn, setAccompOn] = useState<Record<string, boolean>>({})   // "typeId:label" -> aceite?
   // Rápida só é possível se TODOS os serviços a permitirem. Basta um
   // que não permita para o carro ir obrigatoriamente por completa.
   const podeRapida = chosenServices.length > 0 && chosenServices.every(x => x.allowsQuickEntry)
@@ -652,7 +654,7 @@ function Reception({ onDone, onBack, resumeDraftId, onStartPPI }: { onDone: () =
       entryType: quick ? 'quick' : 'full',
       entryPendingReason: entryPending ? pendingReason.trim() : undefined,
       intentions: intentions.length ? intentions : chosenServices.map(x => x.typeName),
-      services: chosenServices.map(({ serviceTypeId, typeName, notes }) => ({ serviceTypeId, typeName, notes })), serviceDescription: svcDesc || undefined,
+      services: expandirServicos(), serviceDescription: svcDesc || undefined,
       bookingDate: bookingDate || undefined,
     }
     try {
@@ -730,6 +732,18 @@ function Reception({ onDone, onBack, resumeDraftId, onStartPPI }: { onDone: () =
 
   const toggleService = (t: any) => {
     const ehPPI = /ppi/i.test(t.name)
+    // Ao escolher (não PPI), buscar os acompanhamentos sugeridos.
+    if (!ehPPI && !accompSug[t.id]) {
+      api(`/api/v1/service-types/${t.id}/accompaniments`)
+        .then(r => {
+          const items = r.data || []
+          if (items.length) {
+            setAccompSug(s => ({ ...s, [t.id]: items }))
+            // por defeito, vêm marcados os que auto_suggest
+            setAccompOn(o => { const n = { ...o }; items.forEach((it: any) => { if (it.auto_suggest) n[`${t.id}:${it.label}`] = true }); return n })
+          }
+        }).catch(() => {})
+    }
     setChosenServices(cur => {
       const ja = cur.find(x => x.serviceTypeId === t.id)
       if (ja) {
@@ -751,12 +765,35 @@ function Reception({ onDone, onBack, resumeDraftId, onStartPPI }: { onDone: () =
     })
   }
 
+  // Expande os serviços escolhidos com os acompanhamentos aceites:
+  // os do tipo "serviço" viram serviços próprios; materiais e
+  // consumíveis aceites vão como nota no serviço-mãe (entram no
+  // orçamento na Fase 5).
+  const expandirServicos = () => {
+    const base = chosenServices.map(({ serviceTypeId, typeName, notes }) => ({ serviceTypeId, typeName, notes }))
+    const extraServicos: any[] = []
+    for (const cs of chosenServices) {
+      const sug = accompSug[cs.serviceTypeId] || []
+      const matNotes: string[] = []
+      for (const it of sug) {
+        if (!accompOn[`${cs.serviceTypeId}:${it.label}`]) continue
+        if (it.kind === 'service') extraServicos.push({ serviceTypeId: null, typeName: it.label, notes: `(de ${cs.typeName})` })
+        else matNotes.push(it.label + (it.default_qty ? ` ${it.default_qty}${it.unit ? it.unit : ''}` : ''))
+      }
+      if (matNotes.length) {
+        const alvo = base.find(b => b.typeName === cs.typeName)
+        if (alvo) alvo.notes = [alvo.notes, 'Inclui: ' + matNotes.join(', ')].filter(Boolean).join(' · ')
+      }
+    }
+    return [...base, ...extraServicos]
+  }
+
+  const removeIntention = (v: string) => setIntentions(xs => xs.filter(x => x !== v))
   const addIntention = (v: string) => {
     const t = v.trim()
     if (t && !intentions.includes(t)) setIntentions(xs => [...xs, t])
     setIntentInput('')
   }
-  const removeIntention = (v: string) => setIntentions(xs => xs.filter(x => x !== v))
 
   const addDamage = (area: string) =>
     setDamages(ds => [...ds, { id: crypto.randomUUID().slice(0, 8), area, note: '', photo: null }])
@@ -834,7 +871,7 @@ function Reception({ onDone, onBack, resumeDraftId, onStartPPI }: { onDone: () =
       entryType: quick ? 'quick' : 'full',
       entryPendingReason: entryPending ? pendingReason.trim() : undefined,
       intentions: intentions.length ? intentions : chosenServices.map(x => x.typeName),
-      services: chosenServices.map(({ serviceTypeId, typeName, notes }) => ({ serviceTypeId, typeName, notes })), serviceDescription: svcDesc || undefined,
+      services: expandirServicos(), serviceDescription: svcDesc || undefined,
       bookingDate: bookingDate || undefined,
       termsVersion: terms?.version || '1.0',
       termsAcceptedAt: new Date().toISOString(),
@@ -1174,6 +1211,28 @@ function Reception({ onDone, onBack, resumeDraftId, onStartPPI }: { onDone: () =
                   <p className="hint" style={{ marginTop: 6 }}>Já vem escolhido pelo tipo de serviço — muda se este cliente for exceção.</p>
                 </div>
               )}
+
+              {/* Sugestões: o que costuma vir com cada serviço escolhido */}
+              {chosenServices.filter(cs => (accompSug[cs.serviceTypeId] || []).length > 0).map(cs => (
+                <div key={cs.serviceTypeId} className="accomp-sug">
+                  <div className="accomp-sug-head">
+                    <i className="ti ti-bulb" aria-hidden="true"></i>
+                    "{cs.typeName}" costuma levar — confirma o que se aplica:
+                  </div>
+                  {(accompSug[cs.serviceTypeId] || []).map((it: any) => {
+                    const key = `${cs.serviceTypeId}:${it.label}`
+                    return (
+                      <button key={key} className={`accomp-sug-item ${accompOn[key] ? 'on' : ''}`}
+                        onClick={() => setAccompOn(o => ({ ...o, [key]: !o[key] }))}>
+                        <span className="chk-box">{accompOn[key] && <i className="ti ti-check" aria-hidden="true"></i>}</span>
+                        <span>{it.label}{it.default_qty ? ` (${it.default_qty}${it.unit ? ' ' + it.unit : ''})` : ''}
+                          <span className="accomp-sug-kind">{it.kind === 'service' ? 'serviço' : it.kind === 'material' ? 'material' : 'consumível'}</span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ))}
             </>
           )}
 
