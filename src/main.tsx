@@ -1828,7 +1828,7 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
   const markDelivered = async (jo: any) => {
     if (!confirm(`Marcar ${jo.number} como finalizada/entregue?\n\nUsa isto para fechar carros já tratados enquanto o ciclo completo não está pronto.`)) return
     try {
-      await api(`/api/v1/receptions/${jo.id}/status`, { method: 'POST', body: JSON.stringify({ status: 'delivered' }) })
+      await api(`/api/v1/receptions/${jo.id}/status`, { method: 'POST', body: JSON.stringify({ status: 'delivered', force: true }) })
       setRows(rs => rs.map(r => r.id === jo.id ? { ...r, status: 'delivered' } : r))
     } catch { alert('Não foi possível finalizar.') }
   }
@@ -5190,9 +5190,9 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
       {isOwner && jo.status !== 'delivered' && (
         <button className="btn-ghost" style={{ width: '100%', justifyContent: 'center', marginTop: 12 }}
           onClick={async () => {
-            if (!confirm(`Marcar ${jo.number} como finalizada/entregue?\n\nAtalho temporário para fechar carros já tratados enquanto o ciclo completo não está pronto.`)) return
-            try { await api(`/api/v1/receptions/${joId}/status`, { method: 'POST', body: JSON.stringify({ status: 'delivered' }) }); load() }
-            catch { alert('Não foi possível finalizar.') }
+            if (!confirm(`Marcar ${jo.number} como finalizada/entregue?\n\nAtalho temporário para fechar carros já tratados enquanto o ciclo completo não está pronto. Ignora o controlo de qualidade — usar só em testes.`)) return
+            try { await api(`/api/v1/receptions/${joId}/status`, { method: 'POST', body: JSON.stringify({ status: 'delivered', force: true }) }); load() }
+            catch (e: any) { alert(e?.message || 'Não foi possível finalizar.') }
           }}>
           <i className="ti ti-checkbox" aria-hidden="true"></i> Marcar como finalizada
         </button>
