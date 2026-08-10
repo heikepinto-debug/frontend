@@ -18,7 +18,7 @@ interface Session {
   accessToken: string | null
   refreshToken: string | null
   lastActivity: number          // timestamp da última actividade (para timeout)
-  user: { id: string; name: string; email: string } | null
+  user: { id: string; name: string; email: string; platformAdmin?: boolean } | null
   roles: string[]
   permissions: string[]
   tenant: Tenant | null

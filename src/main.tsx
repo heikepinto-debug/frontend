@@ -102,7 +102,7 @@ function Shell() {
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
   const [temUpdate, setTemUpdate] = useState(false)   // há versão nova à espera
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates' | 'ppi-model' | 'suppliers' | 'qcqueue'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates' | 'ppi-model' | 'suppliers' | 'qcqueue' | 'admin'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
@@ -179,6 +179,7 @@ function Shell() {
     canDo('reception:create') && nav('bookings', 'Marcações', 'ti-calendar-event', bookingCount || undefined, bookingCount > 0),
     nav('tasks', 'Tarefas', 'ti-checklist'),
     canDo('config:manage') && nav('servicetypes', 'Tipos de serviço', 'ti-tool'),
+    user?.platformAdmin && nav('admin', 'Oficinas (admin)', 'ti-building-store'),
     canDo('config:manage') && nav('ppi-model', 'Modelo de inspeção', 'ti-adjustments'),
     canDo('config:manage') && nav('suppliers', 'Fornecedores', 'ti-building-store'),
     nav('updates', 'Novidades', 'ti-bell'),
@@ -340,6 +341,7 @@ function Shell() {
       {view === 'ppi-model' && <PPIModel onBack={() => setView('home')} />}
       {view === 'suppliers' && <SuppliersPage onBack={() => setView('home')} />}
       {view === 'qcqueue' && <QCQueue onBack={() => setView('home')} onOpen={(id) => { setOsId(id); setOsReturnTo('qcqueue'); setView('os') }} />}
+      {view === 'admin' && <AdminWorkshops onBack={() => setView('home')} />}
       {view === 'ppi-list' && <PPIList onBack={() => setView('home')} onOpen={(joId: string) => { setPpiJoId(joId); setPpiReturnTo('ppi-list'); setView('ppi') }} />}
       {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
         onOpenPPI={(id: string) => { setPpiJoId(id); setPpiReturnTo('list'); setView('ppi') }}
@@ -4658,6 +4660,109 @@ function ServiceCosts({ svcId, depts, ownerDeptId, podeGestao, say, onChanged }:
         <button className="accomp-add" onClick={() => setNovo({ category: 'labour', label: '', amount: '', supplierDepartmentId: '' })}><i className="ti ti-plus" aria-hidden="true"></i> Acrescentar custo</button>
       )}
     </div>
+  )
+}
+
+// ── PAINEL DO SUPER-ADMIN — criar e gerir oficinas ───────────
+function AdminWorkshops({ onBack }: { onBack: () => void }) {
+  const [list, setList] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [criar, setCriar] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
+  const [f, setF] = useState<any>({ name: '', slug: '', vatRate: '16', brandColor: '#4F46E5', nuit: '', phone: '', ownerName: '', ownerEmail: '', ownerPassword: '' })
+
+  const load = () => { setLoading(true); api('/api/v1/admin/workshops').then(r => setList(r.data || [])).catch(() => {}).finally(() => setLoading(false)) }
+  useEffect(load, [])
+
+  const slugify = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+
+  const submeter = async () => {
+    if (!f.name.trim() || !f.slug.trim() || !f.ownerName.trim() || !f.ownerEmail.trim() || f.ownerPassword.length < 6) {
+      setMsg({ kind: 'err', text: 'Preenche todos os campos (password com 6+ caracteres).' }); return
+    }
+    setBusy(true); setMsg(null)
+    try {
+      await api('/api/v1/admin/workshops', { method: 'POST', body: JSON.stringify({
+        name: f.name.trim(), slug: f.slug.trim(), vatRate: parseFloat(f.vatRate) || 16,
+        brandColor: f.brandColor, nuit: f.nuit || null, phone: f.phone || null,
+        ownerName: f.ownerName.trim(), ownerEmail: f.ownerEmail.trim(), ownerPassword: f.ownerPassword,
+      }) })
+      setMsg({ kind: 'ok', text: `Oficina "${f.name}" criada. O dono já pode entrar com o email e password.` })
+      setCriar(false); setF({ name: '', slug: '', vatRate: '16', brandColor: '#4F46E5', nuit: '', phone: '', ownerName: '', ownerEmail: '', ownerPassword: '' })
+      load()
+    } catch (e: any) { setMsg({ kind: 'err', text: e?.message || 'Não foi possível criar a oficina.' }) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
+        <h2 style={{ margin: 0, fontSize: 20 }}>Oficinas</h2><span />
+      </div>
+
+      {msg && <div className={`banner ${msg.kind === 'ok' ? 'ok' : 'err'}`} style={{ marginBottom: 12 }}>{msg.text}</div>}
+
+      {!criar && (
+        <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginBottom: 16 }} onClick={() => { setCriar(true); setMsg(null) }}>
+          <i className="ti ti-plus" aria-hidden="true"></i> Criar oficina nova
+        </button>
+      )}
+
+      {criar && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="det-section-title" style={{ marginTop: 0 }}>Nova oficina</div>
+          <label className="fl">Nome da oficina</label>
+          <input value={f.name} onChange={e => setF({ ...f, name: e.target.value, slug: f.slug || slugify(e.target.value) })} placeholder="ex: Auto Reparações Silva" />
+          <label className="fl" style={{ marginTop: 10 }}>Endereço no sistema (slug)</label>
+          <input value={f.slug} onChange={e => setF({ ...f, slug: slugify(e.target.value) })} placeholder="auto-reparacoes-silva" />
+          <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+            <div style={{ flex: 1 }}>
+              <label className="fl">IVA (%)</label>
+              <input type="number" value={f.vatRate} onChange={e => setF({ ...f, vatRate: e.target.value })} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="fl">Cor da marca</label>
+              <input type="color" value={f.brandColor} onChange={e => setF({ ...f, brandColor: e.target.value })} style={{ height: 42, padding: 4 }} />
+            </div>
+          </div>
+          <label className="fl" style={{ marginTop: 10 }}>NUIT (opcional)</label>
+          <input value={f.nuit} onChange={e => setF({ ...f, nuit: e.target.value })} placeholder="número de contribuinte" />
+
+          <div className="det-section-title">Dono da oficina</div>
+          <label className="fl">Nome</label>
+          <input value={f.ownerName} onChange={e => setF({ ...f, ownerName: e.target.value })} placeholder="nome do dono" />
+          <label className="fl" style={{ marginTop: 10 }}>Email (para entrar)</label>
+          <input type="email" value={f.ownerEmail} onChange={e => setF({ ...f, ownerEmail: e.target.value })} placeholder="dono@oficina.co.mz" />
+          <label className="fl" style={{ marginTop: 10 }}>Password inicial</label>
+          <input type="text" value={f.ownerPassword} onChange={e => setF({ ...f, ownerPassword: e.target.value })} placeholder="mínimo 6 caracteres — o dono muda depois" />
+          <p className="hint" style={{ marginTop: 4 }}>Combina a password com o dono; ele pode alterá-la depois de entrar.</p>
+
+          <div className="wf-nav" style={{ marginTop: 14 }}>
+            <button className="btn-ghost" onClick={() => { setCriar(false); setMsg(null) }}>Cancelar</button>
+            <button className="btn-primary" disabled={busy} onClick={submeter}>{busy ? 'A criar…' : 'Criar oficina'}</button>
+          </div>
+        </div>
+      )}
+
+      <div className="sec-label" style={{ margin: '4px 4px 8px', fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '.5px' }}>Oficinas no sistema</div>
+      {loading ? <p className="empty">A carregar…</p> : list.length === 0 ? <p className="empty">Ainda não há oficinas.</p> : (
+        <div className="prob-list">
+          {list.map((w: any) => (
+            <div key={w.id} className="card" style={{ marginBottom: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <div className="h">{w.name}{!w.active && <span className="stype-off-tag"> inativa</span>}</div>
+                  <div className="sub">{w.slug} · {w.users} utilizador{w.users === '1' ? '' : 'es'}{w.owner_name ? ` · ${w.owner_name}` : ''}</div>
+                </div>
+                <span className="pill i">{w.currency}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </main>
   )
 }
 
