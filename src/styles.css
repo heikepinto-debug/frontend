@@ -1193,3 +1193,8 @@ textarea { resize: vertical; line-height: 1.55; }
 
 /* QC: item obrigatório por pedido do cliente */
 .qc-cond { font-size: 10px; font-weight: 700; color: #B45309; background: #FEF3C7; padding: 1px 7px; border-radius: 8px; margin-left: 6px; }
+
+/* Marcações a tratar */
+.lead-card { border: 1px solid var(--line); transition: border-color .15s; }
+.lead-card:hover { border-color: var(--brand-border); }
+.lead-when { display: inline-flex; align-items: center; gap: 3px; }

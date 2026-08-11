@@ -102,7 +102,7 @@ function Shell() {
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
   const [temUpdate, setTemUpdate] = useState(false)   // há versão nova à espera
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates' | 'ppi-model' | 'suppliers' | 'qcqueue' | 'admin'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates' | 'ppi-model' | 'suppliers' | 'qcqueue' | 'admin' | 'quickbooking' | 'leads'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
@@ -112,6 +112,7 @@ function Shell() {
   const [signId, setSignId] = useState<string | undefined>(undefined)
   const [completeId, setCompleteId] = useState<string | undefined>(undefined)
   const [bookingCount, setBookingCount] = useState(0)
+  const [leadCount, setLeadCount] = useState(0)
   const [authCount, setAuthCount] = useState(0)
   const [qcCount, setQcCount] = useState(0)
   const isOwner = canDo('jobdelete:any')
@@ -155,6 +156,7 @@ function Shell() {
 
   useEffect(() => {
     if (view === 'home') {
+      api('/api/v1/bookings/leads/count').then(r => setLeadCount(r.count || 0)).catch(() => {})
       api('/api/v1/bookings').then(r => {
         const now = new Date(); now.setHours(23, 59, 59, 999)
         const relevant = (r.data || []).filter((b: any) => new Date(b.booking_date) <= now)
@@ -172,6 +174,8 @@ function Shell() {
   const navItems = [
     nav('home', 'Painel', 'ti-layout-dashboard'),
     canDo('reception:create') && nav('reception', 'Nova recepção', 'ti-plus'),
+    canDo('reception:create') && nav('quickbooking', 'Marcação rápida', 'ti-bolt'),
+    canDo('reception:read') && nav('leads', 'Marcações a tratar', 'ti-inbox', leadCount || undefined, leadCount > 0),
     canDo('reception:read') && nav('list', 'Recepções', 'ti-list-details', summary?.inShop),
     canDo('reception:read') && nav('ppi-list', 'Inspeções PPI', 'ti-clipboard-list'),
     authCount > 0 && nav('authorizations', 'Autorizações', 'ti-clipboard-check', authCount, true),
@@ -342,6 +346,8 @@ function Shell() {
       {view === 'suppliers' && <SuppliersPage onBack={() => setView('home')} />}
       {view === 'qcqueue' && <QCQueue onBack={() => setView('home')} onOpen={(id) => { setOsId(id); setOsReturnTo('qcqueue'); setView('os') }} />}
       {view === 'admin' && <AdminWorkshops onBack={() => setView('home')} />}
+      {view === 'quickbooking' && <QuickBooking onBack={() => setView('home')} onDone={() => setView('leads')} />}
+      {view === 'leads' && <LeadsList onBack={() => setView('home')} onOpen={(id) => { setResumeDraftId(id); setView('reception') }} />}
       {view === 'ppi-list' && <PPIList onBack={() => setView('home')} onOpen={(joId: string) => { setPpiJoId(joId); setPpiReturnTo('ppi-list'); setView('ppi') }} />}
       {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
         onOpenPPI={(id: string) => { setPpiJoId(id); setPpiReturnTo('list'); setView('ppi') }}
@@ -4660,6 +4666,115 @@ function ServiceCosts({ svcId, depts, ownerDeptId, podeGestao, say, onChanged }:
         <button className="accomp-add" onClick={() => setNovo({ category: 'labour', label: '', amount: '', supplierDepartmentId: '' })}><i className="ti ti-plus" aria-hidden="true"></i> Acrescentar custo</button>
       )}
     </div>
+  )
+}
+
+// ── MARCAÇÃO RÁPIDA — a dona lança o mínimo (do WhatsApp) ─────
+function QuickBooking({ onBack, onDone }: { onBack: () => void; onDone: () => void }) {
+  const [f, setF] = useState<any>({ customerPhone: '', customerName: '', make: '', model: '', note: '', bookingDate: '' })
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
+
+  const submeter = async () => {
+    if (!f.note.trim()) { setMsg({ kind: 'err', text: 'Diz o que o cliente precisa (a queixa).' }); return }
+    if (!f.customerPhone.trim() && !f.customerName.trim()) { setMsg({ kind: 'err', text: 'Preciso do contacto ou do nome — pelo menos um.' }); return }
+    setBusy(true); setMsg(null)
+    try {
+      await api('/api/v1/bookings/quick', { method: 'POST', body: JSON.stringify({
+        customerPhone: f.customerPhone || null, customerName: f.customerName || null,
+        make: f.make || null, model: f.model || null,
+        note: f.note.trim(), bookingDate: f.bookingDate || null,
+      }) })
+      setMsg({ kind: 'ok', text: 'Marcação lançada. O supervisor vê-a em "Marcações a tratar".' })
+      setF({ customerPhone: '', customerName: '', make: '', model: '', note: '', bookingDate: '' })
+      setTimeout(onDone, 900)
+    } catch (e: any) { setMsg({ kind: 'err', text: e?.message || 'Não guardou.' }) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
+        <h2 style={{ margin: 0, fontSize: 20 }}>Marcação rápida</h2><span />
+      </div>
+
+      <div className="banner i" style={{ marginBottom: 14 }}>
+        <span style={{ fontWeight: 700, display: 'block', marginBottom: 3 }}>Só o essencial</span>
+        Lança o mínimo do que o cliente disse no WhatsApp. O supervisor recolhe o resto e agenda.
+      </div>
+
+      {msg && <div className={`banner ${msg.kind === 'ok' ? 'ok' : 'err'}`} style={{ marginBottom: 12 }}>{msg.text}</div>}
+
+      <div className="card">
+        <label className="fl">Contacto (WhatsApp / telefone)</label>
+        <input value={f.customerPhone} onChange={e => setF({ ...f, customerPhone: e.target.value })} placeholder="número do cliente" autoFocus />
+        <label className="fl" style={{ marginTop: 10 }}>Nome do cliente (se souberes)</label>
+        <input value={f.customerName} onChange={e => setF({ ...f, customerName: e.target.value })} placeholder="opcional" />
+        <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+          <div style={{ flex: 1 }}>
+            <label className="fl">Marca</label>
+            <input value={f.make} onChange={e => setF({ ...f, make: e.target.value })} placeholder="ex: Toyota" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label className="fl">Modelo</label>
+            <input value={f.model} onChange={e => setF({ ...f, model: e.target.value })} placeholder="ex: Hilux" />
+          </div>
+        </div>
+        <label className="fl" style={{ marginTop: 10 }}>O que precisa? (a queixa) *</label>
+        <textarea value={f.note} onChange={e => setF({ ...f, note: e.target.value })} placeholder="ex: barulho na frente, quer remap, revisão…" rows={3} style={{ width: '100%', boxSizing: 'border-box' }} />
+        <label className="fl" style={{ marginTop: 10 }}>Quando, se souberes (opcional)</label>
+        <input type="datetime-local" value={f.bookingDate} onChange={e => setF({ ...f, bookingDate: e.target.value })} />
+        <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 16 }} disabled={busy} onClick={submeter}>
+          {busy ? 'A lançar…' : 'Lançar marcação'}
+        </button>
+      </div>
+    </main>
+  )
+}
+
+// ── MARCAÇÕES A TRATAR — o Yury vê e completa ────────────────
+function LeadsList({ onBack, onOpen }: { onBack: () => void; onOpen: (id: string) => void }) {
+  const [list, setList] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  useEffect(() => { api('/api/v1/bookings/leads').then(r => setList(r.data || [])).catch(() => {}).finally(() => setLoading(false)) }, [])
+
+  const quando = (d: string) => d ? new Date(d).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null
+
+  return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
+        <h2 style={{ margin: 0, fontSize: 20 }}>Marcações a tratar</h2><span />
+      </div>
+
+      {loading ? <p className="empty">A carregar…</p> : list.length === 0 ? (
+        <div className="banner ok">Não há marcações à espera. Tudo tratado.</div>
+      ) : (
+        <>
+          <p className="hint" style={{ margin: '0 4px 12px' }}>Toca numa marcação para recolher o resto da informação e transformá-la numa recepção.</p>
+          <div className="prob-list">
+            {list.map((l: any) => (
+              <button key={l.id} className="card lead-card" onClick={() => onOpen(l.id)} style={{ width: '100%', textAlign: 'left', display: 'block', marginBottom: 8, cursor: 'pointer' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <div className="avatar" style={{ flexShrink: 0 }}><i className="ti ti-user" aria-hidden="true"></i></div>
+                  <div style={{ flex: 1 }}>
+                    <div className="h">{l.customer_name || l.customer_phone || 'Cliente'}{l.customer_name && l.customer_phone && <span className="sub" style={{ display: 'inline', marginLeft: 6 }}>· {l.customer_phone}</span>}</div>
+                    {(l.booking_make || l.booking_model) && <div className="sub" style={{ marginTop: 1 }}><i className="ti ti-car" aria-hidden="true"></i> {[l.booking_make, l.booking_model].filter(Boolean).join(' ')}</div>}
+                    <div style={{ fontSize: 13.5, color: 'var(--ink-2)', margin: '4px 0' }}>{l.booking_note}</div>
+                    <div className="sub">
+                      {quando(l.booking_date) ? <span className="lead-when"><i className="ti ti-calendar-event" aria-hidden="true"></i> {quando(l.booking_date)}</span> : <span style={{ color: 'var(--ink-3)' }}>sem data</span>}
+                      {l.created_by_name && <span> · lançou {l.created_by_name}</span>}
+                    </div>
+                  </div>
+                  <i className="ti ti-chevron-right" aria-hidden="true" style={{ color: 'var(--ink-3)', flexShrink: 0 }}></i>
+                </div>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </main>
   )
 }
 
