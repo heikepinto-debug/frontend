@@ -4223,7 +4223,7 @@ function QCPanel({ joId, say, onDelivered }: { joId: string; say: (k: 'err' | 'o
   const Item = ({ it }: { it: any }) => (
     <button className={`qc-item ${it.answer?.checked ? 'on' : ''}`} onClick={() => marcar(it.id, !it.answer?.checked)} disabled={aprovado}>
       <span className="qc-box">{it.answer?.checked && <i className="ti ti-check" aria-hidden="true"></i>}</span>
-      <span className="qc-label">{it.label}{it.required && <span className="qc-req">obrig.</span>}</span>
+      <span className="qc-label">{it.label}{it.required && <span className="qc-req">obrig.</span>}{it.conditional_old_parts && it.required && <span className="qc-cond">cliente pediu</span>}</span>
     </button>
   )
 

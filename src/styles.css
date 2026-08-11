@@ -1190,3 +1190,6 @@ textarea { resize: vertical; line-height: 1.55; }
 .svc-cost-pend-tag { font-size: 10px; font-weight: 700; color: #B45309; margin-left: 7px; }
 .svc-cost-ok { background: #FEF3C7; border: 1.5px solid #FCD34D; color: #B45309; border-radius: 7px; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
 .svc-cost-okd { background: none; border: none; color: #15803D; cursor: pointer; font-size: 18px; flex-shrink: 0; }
+
+/* QC: item obrigatório por pedido do cliente */
+.qc-cond { font-size: 10px; font-weight: 700; color: #B45309; background: #FEF3C7; padding: 1px 7px; border-radius: 8px; margin-left: 6px; }
