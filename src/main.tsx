@@ -1906,6 +1906,8 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
                   : !r.signed_at
                     ? <span className="badge-unsigned" title="Finalização não chegou a selar a assinatura"><i className="ti ti-writing-off" aria-hidden="true"></i> Por assinar</span>
                     : <span className={`status s-${r.status}`}>{STATUS_LABEL[r.status] || r.status}</span>}
+              {['ready', 'delivered'].includes(r.status) && r.payment_status === 'paid' && <span className="pay-tag paid"><i className="ti ti-cash" aria-hidden="true"></i> pago</span>}
+              {r.status === 'ready' && r.payment_status !== 'paid' && <span className="pay-tag unpaid"><i className="ti ti-alert-triangle" aria-hidden="true"></i> por pagar</span>}
               </div>
               <div className="list-acts">
               {isDraft && (
@@ -4322,7 +4324,145 @@ function QCPanel({ joId, say, onDelivered }: { joId: string; say: (k: 'err' | 'o
   )
 }
 
-function ServiceRow({ svc, onChanged, say, team, responsibleId }: { svc: any; onChanged: () => void; say: (k: 'err' | 'ok', t: string) => void; team: any[]; responsibleId?: string | null }) {
+// ── Peças a comprar — lista genérica do carro inteiro ────────
+// Agrega as peças (items) de todos os serviços numa lista só, tipo
+// lista de compras. Mesma informação que está dentro de cada serviço,
+// vista de forma agregada — prática para quem vai comprar.
+function PartsToBuy({ services }: { services: any[] }) {
+  const parts: any[] = []
+  for (const s of services) {
+    if (s.status === 'not_done') continue
+    for (const it of (s.items || [])) parts.push({ ...it, serviceName: s.type_name })
+  }
+  if (parts.length === 0) return <p className="hint">Sem peças a comprar. As peças que acrescentares a cada serviço aparecem aqui, todas juntas.</p>
+  return (
+    <div className="parts-buy">
+      {parts.map((p: any, i: number) => (
+        <div key={i} className="parts-buy-row">
+          <div className="parts-buy-main">
+            <span className="parts-buy-label">{p.label}</span>
+            <span className="parts-buy-svc">para {p.serviceName}</span>
+          </div>
+          <div className="parts-buy-qty">{p.qty != null ? `${p.qty}${p.unit ? ' ' + p.unit : ''}` : ''}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Pagamento — marcar um carro como pago (dona ou Yury) ─────
+const METODOS: Record<string, string> = { mpesa: 'M-Pesa', emola: 'e-Mola', transfer: 'Transferência', cash: 'Dinheiro', pos: 'POS' }
+function PaymentPanel({ joId, say, isOwner, onChanged }: { joId: string; say: (k: 'err' | 'ok', t: string) => void; isOwner: boolean; onChanged: () => void }) {
+  const [info, setInfo] = useState<any>(null)
+  const [open, setOpen] = useState(false)
+  const [amount, setAmount] = useState('')
+  const [method, setMethod] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const load = async () => {
+    try { const r = await api(`/api/v1/os/${joId}/total`); setInfo(r); if (r.total && !amount) setAmount(String(r.total)) } catch {}
+  }
+  useEffect(() => { load() }, [joId])
+
+  const pagar = async () => {
+    const val = parseFloat(amount)
+    if (isNaN(val) || val < 0) { say('err', 'Escreve o valor pago.'); return }
+    setBusy(true)
+    try {
+      await api(`/api/v1/os/${joId}/pay`, { method: 'POST', body: JSON.stringify({ amount: val, method: method || null }) })
+      say('ok', 'Pagamento registado.'); setOpen(false); await load(); onChanged()
+    } catch (e: any) { say('err', e?.message || 'Não guardou.') }
+    finally { setBusy(false) }
+  }
+
+  const desmarcar = async () => {
+    setBusy(true)
+    try { await api(`/api/v1/os/${joId}/unpay`, { method: 'POST' }); say('ok', 'Pagamento desmarcado.'); await load(); onChanged() }
+    catch (e: any) { say('err', e?.message || 'Não deu.') }
+    finally { setBusy(false) }
+  }
+
+  if (!info) return null
+  const pago = info.paymentStatus === 'paid'
+
+  return (
+    <div className={`pay-panel ${pago ? 'paid' : 'unpaid'}`}>
+      <div className="pay-head">
+        <div className="pay-head-l">
+          <i className={`ti ${pago ? 'ti-circle-check' : 'ti-cash'}`} aria-hidden="true"></i>
+          <div>
+            <div className="pay-title">{pago ? 'Pago' : 'Pagamento'}</div>
+            <div className="pay-sub">
+              {pago
+                ? <>{info.paidAmount != null ? `${Number(info.paidAmount).toLocaleString('pt-PT')} MT` : ''}{info.paidMethod ? ` · ${METODOS[info.paidMethod] || info.paidMethod}` : ''}</>
+                : info.total > 0 ? `Total a pagar: ${Number(info.total).toLocaleString('pt-PT')} MT` : 'Sem valor no orçamento ainda'}
+            </div>
+          </div>
+        </div>
+        {!pago && <button className="btn-primary btn-sm" onClick={() => setOpen(!open)}>Marcar pago</button>}
+        {pago && isOwner && <button className="btn-ghost btn-sm" onClick={desmarcar} disabled={busy}>Desmarcar</button>}
+      </div>
+      {open && !pago && (
+        <div className="pay-form">
+          <div className="pay-row">
+            <div style={{ flex: 1 }}>
+              <label className="fl">Valor pago (MT)</label>
+              <input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="fl">Meio</label>
+              <select value={method} onChange={e => setMethod(e.target.value)}>
+                <option value="">—</option>
+                {Object.entries(METODOS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="wf-nav" style={{ marginTop: 10 }}>
+            <button className="btn-ghost btn-sm" onClick={() => setOpen(false)}>Cancelar</button>
+            <button className="btn-primary btn-sm" disabled={busy} onClick={pagar}>Confirmar pagamento</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Acrescentar um serviço a fazer (avulso, não vindo de problema) ─
+function AddService({ joId, serviceTypes, onAdded, say }: { joId: string; serviceTypes: any[]; onAdded: () => void; say: (k: 'err' | 'ok', t: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [nome, setNome] = useState('')
+  const [typeId, setTypeId] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const criar = async () => {
+    if (!nome.trim()) return
+    setBusy(true)
+    try {
+      await api(`/api/v1/os/${joId}/services`, { method: 'POST', body: JSON.stringify({ typeName: nome.trim(), serviceTypeId: typeId || null }) })
+      setNome(''); setTypeId(''); setOpen(false); onAdded()
+    } catch (e: any) { say('err', e?.message || 'Não guardou.') }
+    finally { setBusy(false) }
+  }
+
+  if (!open) return <button className="accomp-add" onClick={() => setOpen(true)}><i className="ti ti-plus" aria-hidden="true"></i> Acrescentar serviço</button>
+  return (
+    <div className="svc-cost-form" style={{ marginTop: 8 }}>
+      {serviceTypes.length > 0 && (
+        <select value={typeId} onChange={e => { setTypeId(e.target.value); const t = serviceTypes.find((s: any) => s.id === e.target.value); if (t) setNome(t.name) }}>
+          <option value="">— escolher da lista, ou escrever abaixo —</option>
+          {serviceTypes.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+      )}
+      <input placeholder="nome do serviço (ex: DPF delete, remap, revisão)" value={nome} onChange={e => setNome(e.target.value)} autoFocus />
+      <div className="wf-nav" style={{ marginTop: 8 }}>
+        <button className="btn-ghost btn-sm" onClick={() => { setOpen(false); setNome(''); setTypeId('') }}>Cancelar</button>
+        <button className="btn-primary btn-sm" disabled={busy || !nome.trim()} onClick={criar}>Acrescentar</button>
+      </div>
+    </div>
+  )
+}
+
+function ServiceRow({ svc, onChanged, say, team, responsibleId, onDelete }: { svc: any; onChanged: () => void; say: (k: 'err' | 'ok', t: string) => void; team: any[]; responsibleId?: string | null; onDelete?: () => void }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [hist, setHist] = useState<any[] | null>(null)
@@ -4415,6 +4555,8 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId }: { svc: any; on
       <div className="svc-main">
         <div className="svc-name">{svc.type_name}
           {svc.source === 'diagnosis' && <span className="svc-src">do diagnóstico</span>}
+          {svc.source === 'added' && <span className="svc-src">a fazer</span>}
+          {onDelete && svc.status === 'pending' && <button className="svc-del" onClick={onDelete} title="Remover serviço"><i className="ti ti-x" aria-hidden="true"></i></button>}
         </div>
         <button className={`svc-state ${svcClass(svc.status)}`} onClick={() => setOpen(!open)} disabled={busy}>
           <i className={`ti ${svcIcon(svc.status)}`} aria-hidden="true"></i> {svcLabel(svc.status)}
@@ -5163,17 +5305,26 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
         <QCPanel joId={jo.id} say={say} onDelivered={load} />
       )}
 
+      {['ready', 'quality_check', 'delivered'].includes(jo.status) && (
+        <PaymentPanel joId={jo.id} say={say} isOwner={isOwner} onChanged={load} />
+      )}
+
       {jo.diag_rejected_note && isDiag && (
         <div className="os-reject-note"><i className="ti ti-alert-triangle" aria-hidden="true"></i> Diagnóstico devolvido: {jo.diag_rejected_note}</div>
       )}
 
-      <div className="det-section-title" style={{ marginTop: 18 }}>Serviços deste carro</div>
+      <div className="det-section-title diag-list-title" style={{ marginTop: 18 }}><span className="diag-num">2</span> Serviços a fazer</div>
       <div className="svc-list">
-        {(data?.services || []).length === 0 && <p className="hint">Sem serviços registados.</p>}
+        {(data?.services || []).length === 0 && <p className="hint">Ainda não há serviços. Acrescenta o que é preciso fazer (ex.: DPF delete, revisão, remap).</p>}
         {(data?.services || []).map((s: any) => (
-          <ServiceRow key={s.id} svc={s} onChanged={() => { load(); loadBudget() }} say={say} team={data?.team || []} responsibleId={jo.responsible_id} />
+          <ServiceRow key={s.id} svc={s} onChanged={() => { load(); loadBudget() }} say={say} team={data?.team || []} responsibleId={jo.responsible_id} onDelete={async () => { try { await api(`/api/v1/os/services/${s.id}`, { method: 'DELETE' }); load(); loadBudget() } catch (e: any) { say('err', e?.message || 'Não removeu.') } }} />
         ))}
       </div>
+      <AddService joId={joId} serviceTypes={data?.serviceTypes || []} onAdded={() => { load(); loadBudget() }} say={say} />
+
+      <div className="det-section-title diag-list-title" style={{ marginTop: 18 }}><span className="diag-num">3</span> Peças a comprar</div>
+      <PartsToBuy services={data?.services || []} />
+
 
       {podePreco && budget && (budget.precoCliente > 0 || (budget.porDepartamento || []).length > 0) && (
         <div className="budget-box">
@@ -5205,7 +5356,12 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
         </div>
       )}
 
-      <div className="det-section-title" style={{ marginTop: 18 }}>Lista de problemas</div>
+      <div className="diag-lists-intro">
+        <i className="ti ti-list-check" aria-hidden="true"></i>
+        <span>O diagnóstico organiza-se em três: <strong>problemas encontrados</strong>, <strong>serviços a fazer</strong> e <strong>peças a comprar</strong>. Os serviços e as peças formam o orçamento.</span>
+      </div>
+
+      <div className="det-section-title diag-list-title" style={{ marginTop: 14 }}><span className="diag-num">1</span> Problemas encontrados</div>
       <div className="prob-list">
         {problems.map((p: any) => (
           <div key={p.id} className="prob-card">
