@@ -347,7 +347,7 @@ function Shell() {
       {view === 'qcqueue' && <QCQueue onBack={() => setView('home')} onOpen={(id) => { setOsId(id); setOsReturnTo('qcqueue'); setView('os') }} />}
       {view === 'admin' && <AdminWorkshops onBack={() => setView('home')} />}
       {view === 'quickbooking' && <QuickBooking onBack={() => setView('home')} onDone={() => setView('leads')} />}
-      {view === 'leads' && <LeadsList onBack={() => setView('home')} onOpen={(id) => { setResumeDraftId(id); setView('reception') }} />}
+      {view === 'leads' && <LeadsList onBack={() => setView('home')} onOpen={() => { setResumeDraftId(undefined); setView('reception') }} />}
       {view === 'ppi-list' && <PPIList onBack={() => setView('home')} onOpen={(joId: string) => { setPpiJoId(joId); setPpiReturnTo('ppi-list'); setView('ppi') }} />}
       {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
         onOpenPPI={(id: string) => { setPpiJoId(id); setPpiReturnTo('list'); setView('ppi') }}
@@ -4676,14 +4676,15 @@ function QuickBooking({ onBack, onDone }: { onBack: () => void; onDone: () => vo
   const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
 
   const submeter = async () => {
-    if (!f.note.trim()) { setMsg({ kind: 'err', text: 'Diz o que o cliente precisa (a queixa).' }); return }
-    if (!f.customerPhone.trim() && !f.customerName.trim()) { setMsg({ kind: 'err', text: 'Preciso do contacto ou do nome — pelo menos um.' }); return }
+    if (!f.customerPhone.trim() && !f.customerName.trim() && !f.note.trim() && !f.make.trim()) {
+      setMsg({ kind: 'err', text: 'Escreve pelo menos alguma coisa (contacto, nome ou a queixa).' }); return
+    }
     setBusy(true); setMsg(null)
     try {
       await api('/api/v1/bookings/quick', { method: 'POST', body: JSON.stringify({
         customerPhone: f.customerPhone || null, customerName: f.customerName || null,
         make: f.make || null, model: f.model || null,
-        note: f.note.trim(), bookingDate: f.bookingDate || null,
+        note: f.note.trim() || null, bookingDate: f.bookingDate || null,
       }) })
       setMsg({ kind: 'ok', text: 'Marcação lançada. O supervisor vê-a em "Marcações a tratar".' })
       setF({ customerPhone: '', customerName: '', make: '', model: '', note: '', bookingDate: '' })
@@ -4721,7 +4722,7 @@ function QuickBooking({ onBack, onDone }: { onBack: () => void; onDone: () => vo
             <input value={f.model} onChange={e => setF({ ...f, model: e.target.value })} placeholder="ex: Hilux" />
           </div>
         </div>
-        <label className="fl" style={{ marginTop: 10 }}>O que precisa? (a queixa) *</label>
+        <label className="fl" style={{ marginTop: 10 }}>O que precisa? (a queixa)</label>
         <textarea value={f.note} onChange={e => setF({ ...f, note: e.target.value })} placeholder="ex: barulho na frente, quer remap, revisão…" rows={3} style={{ width: '100%', boxSizing: 'border-box' }} />
         <label className="fl" style={{ marginTop: 10 }}>Quando, se souberes (opcional)</label>
         <input type="datetime-local" value={f.bookingDate} onChange={e => setF({ ...f, bookingDate: e.target.value })} />
@@ -4737,9 +4738,14 @@ function QuickBooking({ onBack, onDone }: { onBack: () => void; onDone: () => vo
 function LeadsList({ onBack, onOpen }: { onBack: () => void; onOpen: (id: string) => void }) {
   const [list, setList] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [aberta, setAberta] = useState<string | null>(null)
   useEffect(() => { api('/api/v1/bookings/leads').then(r => setList(r.data || [])).catch(() => {}).finally(() => setLoading(false)) }, [])
 
   const quando = (d: string) => d ? new Date(d).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null
+
+  const tratada = async (id: string) => {
+    try { await api(`/api/v1/bookings/leads/${id}/done`, { method: 'POST' }); setList(ls => ls.filter(l => l.id !== id)) } catch {}
+  }
 
   return (
     <main className="reception">
@@ -4752,24 +4758,32 @@ function LeadsList({ onBack, onOpen }: { onBack: () => void; onOpen: (id: string
         <div className="banner ok">Não há marcações à espera. Tudo tratado.</div>
       ) : (
         <>
-          <p className="hint" style={{ margin: '0 4px 12px' }}>Toca numa marcação para recolher o resto da informação e transformá-la numa recepção.</p>
+          <p className="hint" style={{ margin: '0 4px 12px' }}>Toca numa marcação para ver os detalhes. Depois recolhe o resto do cliente e inicia a recepção.</p>
           <div className="prob-list">
             {list.map((l: any) => (
-              <button key={l.id} className="card lead-card" onClick={() => onOpen(l.id)} style={{ width: '100%', textAlign: 'left', display: 'block', marginBottom: 8, cursor: 'pointer' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+              <div key={l.id} className="card lead-card" style={{ marginBottom: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }} onClick={() => setAberta(aberta === l.id ? null : l.id)}>
                   <div className="avatar" style={{ flexShrink: 0 }}><i className="ti ti-user" aria-hidden="true"></i></div>
                   <div style={{ flex: 1 }}>
                     <div className="h">{l.customer_name || l.customer_phone || 'Cliente'}{l.customer_name && l.customer_phone && <span className="sub" style={{ display: 'inline', marginLeft: 6 }}>· {l.customer_phone}</span>}</div>
-                    {(l.booking_make || l.booking_model) && <div className="sub" style={{ marginTop: 1 }}><i className="ti ti-car" aria-hidden="true"></i> {[l.booking_make, l.booking_model].filter(Boolean).join(' ')}</div>}
-                    <div style={{ fontSize: 13.5, color: 'var(--ink-2)', margin: '4px 0' }}>{l.booking_note}</div>
+                    {(l.make || l.model) && <div className="sub" style={{ marginTop: 1 }}><i className="ti ti-car" aria-hidden="true"></i> {[l.make, l.model].filter(Boolean).join(' ')}</div>}
+                    {l.note && <div style={{ fontSize: 13.5, color: 'var(--ink-2)', margin: '4px 0' }}>{l.note}</div>}
                     <div className="sub">
                       {quando(l.booking_date) ? <span className="lead-when"><i className="ti ti-calendar-event" aria-hidden="true"></i> {quando(l.booking_date)}</span> : <span style={{ color: 'var(--ink-3)' }}>sem data</span>}
                       {l.created_by_name && <span> · lançou {l.created_by_name}</span>}
                     </div>
                   </div>
-                  <i className="ti ti-chevron-right" aria-hidden="true" style={{ color: 'var(--ink-3)', flexShrink: 0 }}></i>
+                  <i className={`ti ti-chevron-${aberta === l.id ? 'up' : 'down'}`} aria-hidden="true" style={{ color: 'var(--ink-3)', flexShrink: 0 }}></i>
                 </div>
-              </button>
+                {aberta === l.id && (
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)', display: 'flex', gap: 8 }}>
+                    <button className="btn-primary btn-sm" style={{ flex: 1 }} onClick={() => { tratada(l.id); onOpen(l.id) }}>
+                      <i className="ti ti-plus" aria-hidden="true"></i> Iniciar recepção
+                    </button>
+                    <button className="btn-ghost btn-sm" onClick={() => tratada(l.id)}>Marcar tratada</button>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         </>
