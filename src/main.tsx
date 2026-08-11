@@ -4482,6 +4482,9 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId, onDelete }: { sv
   const podeCusto = useSession(s => s.can)('cost:register')
   const [depts, setDepts] = useState<any[]>([])
   useEffect(() => { if (podePreco) api('/api/v1/departments').then(r => setDepts(r.data || [])).catch(() => {}) }, [podePreco])
+  const [precoEdit, setPrecoEdit] = useState<string>(svc.price != null ? String(svc.price) : '')
+  const [deptEdit, setDeptEdit] = useState<string>(svc.department_id || '')
+  useEffect(() => { setPrecoEdit(svc.price != null ? String(svc.price) : ''); setDeptEdit(svc.department_id || '') }, [svc.price, svc.department_id])
 
   const OUT_LBL: any = { none: '', sent: 'Enviado ao fornecedor', at_supplier: 'No fornecedor', returned: 'Voltou do fornecedor' }
   const workers: any[] = svc.workers || []
@@ -4641,7 +4644,8 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId, onDelete }: { sv
                   <label className="fl" style={{ marginTop: 10 }}>Custo do fornecedor (MT) <span className="opt-tag">só contas</span></label>
                   <input type="number" inputMode="decimal" key={svc.supplier_cost ?? 'empty'} defaultValue={svc.supplier_cost ?? ''}
                     placeholder="o que o fornecedor cobra"
-                    onBlur={e => { const v = e.target.value === '' ? null : parseFloat(e.target.value); gravarOut({ outsourced: true, cost: v }) }} />
+                    onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value === '' ? null : parseFloat((e.target as HTMLInputElement).value); gravarOut({ outsourced: true, cost: v }); (e.target as HTMLInputElement).blur() } }} />
+                  <p className="hint" style={{ marginTop: 3 }}>Escreve o valor e carrega Enter para guardar.</p>
                 </>
               )}
             </>
@@ -4706,18 +4710,23 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId, onDelete }: { sv
           <div className="svc-pricing-row">
             <div style={{ flex: 1 }}>
               <label className="fl">Preço ao cliente (sem IVA)</label>
-              <input type="number" inputMode="decimal" key={svc.price ?? 'empty'} defaultValue={svc.price ?? ''}
-                placeholder="0 MT"
-                onBlur={e => { const v = e.target.value === '' ? null : parseFloat(e.target.value); gravarPreco({ price: v }) }} />
+              <input type="number" inputMode="decimal" value={precoEdit} placeholder="0 MT"
+                onChange={e => setPrecoEdit(e.target.value)} />
             </div>
             <div style={{ flex: 1 }}>
               <label className="fl">Departamento</label>
-              <select value={svc.department_id || ''} onChange={e => gravarPreco({ departmentId: e.target.value || null })}>
+              <select value={deptEdit} onChange={e => setDeptEdit(e.target.value)}>
                 <option value="">— escolher —</option>
                 {depts.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </div>
           </div>
+          {(precoEdit !== (svc.price != null ? String(svc.price) : '') || deptEdit !== (svc.department_id || '')) && (
+            <div className="wf-nav" style={{ marginTop: 8 }}>
+              <button className="btn-ghost btn-sm" onClick={() => { setPrecoEdit(svc.price != null ? String(svc.price) : ''); setDeptEdit(svc.department_id || '') }}>Repor</button>
+              <button className="btn-primary btn-sm" onClick={() => gravarPreco({ price: precoEdit === '' ? null : parseFloat(precoEdit), departmentId: deptEdit || null })}>Guardar orçamento</button>
+            </div>
+          )}
         </div>
       )}
       {podeCusto && (
