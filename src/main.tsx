@@ -104,6 +104,7 @@ function Shell() {
   const [temUpdate, setTemUpdate] = useState(false)   // há versão nova à espera
   const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates' | 'ppi-model' | 'suppliers' | 'qcqueue' | 'admin' | 'quickbooking' | 'leads'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
+  const [leadPrefill, setLeadPrefill] = useState<any>(undefined)   // dados da marcação rápida + modo
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
   const [ppiJoId, setPpiJoId] = useState<string | null>(null)
@@ -174,8 +175,6 @@ function Shell() {
   const navItems = [
     nav('home', 'Painel', 'ti-layout-dashboard'),
     canDo('reception:create') && nav('reception', 'Nova recepção', 'ti-plus'),
-    canDo('reception:create') && nav('quickbooking', 'Marcação rápida', 'ti-bolt'),
-    canDo('reception:read') && nav('leads', 'Marcações a tratar', 'ti-inbox', leadCount || undefined, leadCount > 0),
     canDo('reception:read') && nav('list', 'Recepções', 'ti-list-details', summary?.inShop),
     canDo('reception:read') && nav('ppi-list', 'Inspeções PPI', 'ti-clipboard-list'),
     authCount > 0 && nav('authorizations', 'Autorizações', 'ti-clipboard-check', authCount, true),
@@ -335,7 +334,7 @@ function Shell() {
           </div>
         </main>
       )}
-      {view === 'reception' && <Reception key={resumeDraftId || 'new'} resumeDraftId={resumeDraftId} onDone={() => { setResumeDraftId(undefined); setView('list') }} onBack={() => { setResumeDraftId(undefined); setView('home') }} onStartPPI={(joId: string) => { setResumeDraftId(undefined); setPpiJoId(joId); setPpiReturnTo('list'); setView('ppi') }} />}
+      {view === 'reception' && <Reception key={resumeDraftId || (leadPrefill?.id ? 'lead-' + leadPrefill.id : 'new')} resumeDraftId={resumeDraftId} leadPrefill={leadPrefill} onDone={() => { setResumeDraftId(undefined); setLeadPrefill(undefined); setView('list') }} onBack={() => { setResumeDraftId(undefined); setLeadPrefill(undefined); setView('home') }} onStartPPI={(joId: string) => { setResumeDraftId(undefined); setLeadPrefill(undefined); setPpiJoId(joId); setPpiReturnTo('list'); setView('ppi') }} />}
       {view === 'ppi' && ppiJoId && <PPICircuit joId={ppiJoId} onBack={() => setView(ppiReturnTo)} />}
       {novidades && novidades.length > 0 && (
         <UpdatesPopup updates={novidades} primeiraVez={novPrimeira}
@@ -347,7 +346,7 @@ function Shell() {
       {view === 'qcqueue' && <QCQueue onBack={() => setView('home')} onOpen={(id) => { setOsId(id); setOsReturnTo('qcqueue'); setView('os') }} />}
       {view === 'admin' && <AdminWorkshops onBack={() => setView('home')} />}
       {view === 'quickbooking' && <QuickBooking onBack={() => setView('home')} onDone={() => setView('leads')} />}
-      {view === 'leads' && <LeadsList onBack={() => setView('home')} onOpen={() => { setResumeDraftId(undefined); setView('reception') }} />}
+      {view === 'leads' && <LeadsList onBack={() => setView('home')} onStart={(lead: any, mode: string) => { setResumeDraftId(undefined); setLeadPrefill({ ...lead, mode }); setView('reception') }} />}
       {view === 'ppi-list' && <PPIList onBack={() => setView('home')} onOpen={(joId: string) => { setPpiJoId(joId); setPpiReturnTo('ppi-list'); setView('ppi') }} />}
       {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
         onOpenPPI={(id: string) => { setPpiJoId(id); setPpiReturnTo('list'); setView('ppi') }}
@@ -489,7 +488,7 @@ const V = {
 }
 
 
-function Reception({ onDone, onBack, resumeDraftId, onStartPPI }: { onDone: () => void; onBack: () => void; resumeDraftId?: string; onStartPPI?: (joId: string) => void }) {
+function Reception({ onDone, onBack, resumeDraftId, leadPrefill, onStartPPI }: { onDone: () => void; onBack: () => void; resumeDraftId?: string; leadPrefill?: any; onStartPPI?: (joId: string) => void }) {
   const tenant = useSession(s => s.tenant)
   const [step, setStep] = useState(0)
   // O modo de entrada decide-se DEPOIS dos serviços (não à partida):
@@ -640,6 +639,20 @@ function Reception({ onDone, onBack, resumeDraftId, onStartPPI }: { onDone: () =
       setDraftLoadError(e?.message || 'Não foi possível carregar este rascunho. Verifica a ligação e tenta outra vez.')
     })
   }, [resumeDraftId])
+
+  // Pré-preencher a partir de uma marcação rápida (o Yury escolheu continuar).
+  useEffect(() => {
+    if (!leadPrefill) return
+    if (leadPrefill.customer_name) setCustName(leadPrefill.customer_name)
+    if (leadPrefill.customer_phone) setCustPhone(leadPrefill.customer_phone)
+    if (leadPrefill.make) setBrand(leadPrefill.make)
+    if (leadPrefill.model) setModel(leadPrefill.model)
+    if (leadPrefill.note) setSvcDesc(leadPrefill.note)
+    if (leadPrefill.booking_date) setBookingDate(String(leadPrefill.booking_date).slice(0, 16))
+    // o modo escolhido no LeadsList
+    if (leadPrefill.mode === 'quick') setEntryMode('quick')
+    else if (leadPrefill.mode === 'full') setEntryMode('full')
+  }, [leadPrefill])
 
   // Guardar rascunho (precisa de cliente + viatura)
   const canSaveDraft = (!!existingCust || (newCust && custName.trim().length >= 2 && V.phone(custPhone)))
@@ -930,6 +943,8 @@ function Reception({ onDone, onBack, resumeDraftId, onStartPPI }: { onDone: () =
         }),
       })
       setProgress(null)
+      // Se esta recepção veio de uma marcação rápida, marca-a como tratada.
+      if (leadPrefill?.id) { try { await api(`/api/v1/bookings/leads/${leadPrefill.id}/done`, { method: 'POST' }) } catch {} }
       setResult({ number: jo.number, offline: false, joId: jo.id, hasPpi: chosenServices.some(x => /ppi/i.test(x.typeName)) })
     } catch (e: any) {
       // A fila offline só serve para o que NUNCA chegou ao servidor. Se a JO
@@ -4886,7 +4901,7 @@ function QuickBooking({ onBack, onDone }: { onBack: () => void; onDone: () => vo
 }
 
 // ── MARCAÇÕES A TRATAR — o Yury vê e completa ────────────────
-function LeadsList({ onBack, onOpen }: { onBack: () => void; onOpen: (id: string) => void }) {
+function LeadsList({ onBack, onStart }: { onBack: () => void; onStart: (lead: any, mode: string) => void }) {
   const [list, setList] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [aberta, setAberta] = useState<string | null>(null)
@@ -4927,11 +4942,26 @@ function LeadsList({ onBack, onOpen }: { onBack: () => void; onOpen: (id: string
                   <i className={`ti ti-chevron-${aberta === l.id ? 'up' : 'down'}`} aria-hidden="true" style={{ color: 'var(--ink-3)', flexShrink: 0 }}></i>
                 </div>
                 {aberta === l.id && (
-                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)', display: 'flex', gap: 8 }}>
-                    <button className="btn-primary btn-sm" style={{ flex: 1 }} onClick={() => { tratada(l.id); onOpen(l.id) }}>
-                      <i className="ti ti-plus" aria-hidden="true"></i> Iniciar recepção
-                    </button>
-                    <button className="btn-ghost btn-sm" onClick={() => tratada(l.id)}>Marcar tratada</button>
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
+                    <p className="hint" style={{ margin: '0 0 8px' }}>O que queres fazer com esta marcação? Os dados já vão preenchidos.</p>
+                    <div className="lead-actions">
+                      <button className="lead-act" onClick={() => onStart(l, 'schedule')}>
+                        <i className="ti ti-calendar-plus" aria-hidden="true"></i>
+                        <span><strong>Completar marcação</strong><small>agendar com mais detalhes</small></span>
+                      </button>
+                      <button className="lead-act" onClick={() => onStart(l, 'full')}>
+                        <i className="ti ti-clipboard-check" aria-hidden="true"></i>
+                        <span><strong>Receber — entrada completa</strong><small>o carro chegou, registar tudo</small></span>
+                      </button>
+                      <button className="lead-act" onClick={() => onStart(l, 'quick')}>
+                        <i className="ti ti-bolt" aria-hidden="true"></i>
+                        <span><strong>Receber — entrada rápida</strong><small>serviço rápido, o cliente espera</small></span>
+                      </button>
+                      <button className="lead-act subtle" onClick={() => tratada(l.id)}>
+                        <i className="ti ti-check" aria-hidden="true"></i>
+                        <span><strong>Marcar tratada</strong><small>sem abrir recepção</small></span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
