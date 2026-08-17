@@ -105,6 +105,7 @@ function Shell() {
   const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates' | 'ppi-model' | 'suppliers' | 'qcqueue' | 'admin' | 'quickbooking' | 'leads'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [leadPrefill, setLeadPrefill] = useState<any>(undefined)   // dados da marcação rápida + modo
+  const [listFilter, setListFilter] = useState<'all' | 'diagnosis' | 'working' | 'ready' | 'delivered'>('all')
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
   const [ppiJoId, setPpiJoId] = useState<string | null>(null)
@@ -268,19 +269,19 @@ function Shell() {
 
           {/* Painel de relance */}
           <div className="stat-grid">
-            <button className="stat-card accent" onClick={() => setView('list')}>
+            <button className="stat-card accent" onClick={() => { setListFilter('all'); setView('list') }}>
               <div className="stat-num">{summary?.inShop ?? '–'}</div>
               <div className="stat-label">Carros na oficina</div>
             </button>
-            <button className="stat-card" onClick={() => setView('list')}>
+            <button className="stat-card" onClick={() => { setListFilter('diagnosis'); setView('list') }}>
               <div className="stat-num">{summary?.diagnosing ?? '–'}</div>
               <div className="stat-label">Em diagnóstico</div>
             </button>
-            <button className="stat-card" onClick={() => setView('list')}>
+            <button className="stat-card" onClick={() => { setListFilter('working'); setView('list') }}>
               <div className="stat-num">{summary?.working ?? '–'}</div>
               <div className="stat-label">Em trabalho</div>
             </button>
-            <button className="stat-card ok" onClick={() => setView('list')}>
+            <button className="stat-card ok" onClick={() => { setListFilter('ready'); setView('list') }}>
               <div className="stat-num">{summary?.ready ?? '–'}</div>
               <div className="stat-label">Prontos a levantar</div>
             </button>
@@ -348,7 +349,7 @@ function Shell() {
       {view === 'quickbooking' && <QuickBooking onBack={() => setView('home')} onDone={() => setView('leads')} />}
       {view === 'leads' && <LeadsList onBack={() => setView('home')} onStart={(lead: any, mode: string) => { setResumeDraftId(undefined); setLeadPrefill({ ...lead, mode }); setView('reception') }} />}
       {view === 'ppi-list' && <PPIList onBack={() => setView('home')} onOpen={(joId: string) => { setPpiJoId(joId); setPpiReturnTo('ppi-list'); setView('ppi') }} />}
-      {view === 'list' && <ReceptionList onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
+      {view === 'list' && <ReceptionList initialFilter={listFilter} onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
         onOpenPPI={(id: string) => { setPpiJoId(id); setPpiReturnTo('list'); setView('ppi') }}
         onSign={(id: string) => { setSignId(id); setView('sign') }}
         onComplete={(id: string) => { setCompleteId(id); setView('complete') }} />}
@@ -1792,13 +1793,13 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: 'Cancelado',
 }
 
-function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, onComplete, onOpenPPI }: { onBack: () => void; onResume: (id: string) => void; onOpen: (id: string) => void; isOwner: boolean; onOpenOS?: (id: string) => void; onSign?: (id: string) => void; onComplete?: (id: string) => void; onOpenPPI?: (id: string) => void }) {
+function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, onComplete, onOpenPPI, initialFilter }: { onBack: () => void; onResume: (id: string) => void; onOpen: (id: string) => void; isOwner: boolean; onOpenOS?: (id: string) => void; onSign?: (id: string) => void; onComplete?: (id: string) => void; onOpenPPI?: (id: string) => void; initialFilter?: 'all' | 'diagnosis' | 'working' | 'ready' | 'delivered' }) {
   const canDelete = useSession(s => s.can('jobdelete:any'))
   const canStatus = useSession(s => s.can('jobdelete:any'))   // mudar estado: só dono, nesta fase
   const [rows, setRows] = useState<any[]>([])
   const [pdfBusy, setPdfBusy] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState<'all' | 'diagnosis' | 'working' | 'ready' | 'delivered'>('all')
+  const [filter, setFilter] = useState<'all' | 'diagnosis' | 'working' | 'ready' | 'delivered'>(initialFilter || 'all')
   const [loading, setLoading] = useState(true)
 
   const load = (q = '') => {
