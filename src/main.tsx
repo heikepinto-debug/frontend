@@ -5077,6 +5077,53 @@ function AdminWorkshops({ onBack }: { onBack: () => void }) {
   )
 }
 
+// ── Guia de workflow: em que etapa está o carro e qual o próximo passo ──
+// Camada de orientação por cima do fluxo existente. Não muda a lógica —
+// só torna visível onde o carro está e o que vem a seguir.
+const WORKFLOW_STEPS: { key: string; label: string; statuses: string[] }[] = [
+  { key: 'entrada', label: 'Entrada', statuses: ['draft', 'reception'] },
+  { key: 'diagnostico', label: 'Diagnóstico', statuses: ['awaiting_diagnosis', 'in_diagnosis'] },
+  { key: 'autorizacao', label: 'Autorização', statuses: ['diagnosis_review'] },
+  { key: 'orcamento', label: 'Orçamento', statuses: ['awaiting_quote', 'quote_sent'] },
+  { key: 'aprovacao', label: 'Aprovação', statuses: ['approved'] },
+  { key: 'execucao', label: 'Execução', statuses: ['in_progress'] },
+  { key: 'qc', label: 'QC de saída', statuses: ['quality_check'] },
+  { key: 'entrega', label: 'Entrega', statuses: ['ready', 'delivered'] },
+]
+const NEXT_STEP_HINT: Record<string, string> = {
+  awaiting_diagnosis: 'Próximo passo: o mecânico regista os problemas, serviços a fazer e peças a comprar, e submete para autorização.',
+  in_diagnosis: 'Próximo passo: terminar o diagnóstico (problemas, serviços, peças) e submeter para autorização.',
+  diagnosis_review: 'Próximo passo: rever o diagnóstico e autorizar (ou devolver).',
+  awaiting_quote: 'Próximo passo: a gestão põe o preço ao cliente em cada serviço e monta o orçamento.',
+  quote_sent: 'Próximo passo: aguardar a aprovação do cliente ao orçamento.',
+  approved: 'Próximo passo: iniciar a execução do trabalho aprovado.',
+  in_progress: 'Próximo passo: terminar os serviços; quando tudo estiver feito, iniciar o QC de saída.',
+  quality_check: 'Próximo passo: fazer o QC de saída. Nada sai sem o QC aprovado e assinado.',
+  ready: 'Próximo passo: receber o pagamento e entregar o carro ao cliente.',
+  delivered: 'Ciclo concluído. O carro foi entregue.',
+}
+function WorkflowGuide({ status }: { status: string }) {
+  if (status === 'cancelled') return null
+  const currentIdx = WORKFLOW_STEPS.findIndex(s => s.statuses.includes(status))
+  const hint = NEXT_STEP_HINT[status]
+  return (
+    <div className="wfg">
+      <div className="wfg-track">
+        {WORKFLOW_STEPS.map((s, i) => {
+          const state = i < currentIdx ? 'done' : i === currentIdx ? 'now' : 'todo'
+          return (
+            <div key={s.key} className={`wfg-step ${state}`}>
+              <div className="wfg-dot">{state === 'done' ? <i className="ti ti-check" aria-hidden="true"></i> : i + 1}</div>
+              <div className="wfg-lbl">{s.label}</div>
+            </div>
+          )
+        })}
+      </div>
+      {hint && <div className="wfg-hint"><i className="ti ti-arrow-right" aria-hidden="true"></i> {hint}</div>}
+    </div>
+  )
+}
+
 function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: string; onBack: () => void; myId: string; isOwner: boolean; onOpenEntry?: (id: string) => void }) {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -5299,6 +5346,8 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
       )}
       <Banner msg={msg} onClose={() => setMsg(null)} />
       <ConfirmBox ask={ask} onNo={() => setAsk(null)} onYes={(reason?: string) => { const r = ask?.run; setAsk(null); r?.(reason) }} />
+
+      <WorkflowGuide status={jo.status} />
 
       <div className="os-status-bar">
         <span className="os-veh">{jo.brand} {jo.model} · {jo.plate}</span>

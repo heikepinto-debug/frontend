@@ -1236,3 +1236,18 @@ textarea { resize: vertical; line-height: 1.55; }
 .parts-buy-label { font-size: 14px; color: var(--ink); font-weight: 500; }
 .parts-buy-svc { font-size: 11.5px; color: var(--ink-3); }
 .parts-buy-qty { font-size: 13px; color: var(--ink-2); font-weight: 600; white-space: nowrap; }
+
+/* ── Guia de workflow (o "próximo passo visível") ── */
+.wfg { background: var(--s1); border: 1px solid var(--line-2); border-radius: var(--radius); padding: 14px 14px 12px; margin-bottom: 14px; }
+.wfg-track { display: flex; align-items: flex-start; gap: 0; overflow-x: auto; padding-bottom: 4px; }
+.wfg-step { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; min-width: 58px; position: relative; }
+.wfg-step:not(:last-child)::after { content: ''; position: absolute; top: 13px; left: 50%; width: 100%; height: 2px; background: var(--line-2); z-index: 0; }
+.wfg-step.done:not(:last-child)::after { background: var(--brand); }
+.wfg-dot { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; position: relative; z-index: 1; background: var(--s2); color: var(--ink-3); border: 2px solid var(--line-2); }
+.wfg-step.done .wfg-dot { background: var(--brand); color: #fff; border-color: var(--brand); }
+.wfg-step.now .wfg-dot { background: #fff; color: var(--brand); border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-bg); }
+.wfg-lbl { font-size: 10.5px; color: var(--ink-3); text-align: center; line-height: 1.2; }
+.wfg-step.now .wfg-lbl { color: var(--brand); font-weight: 700; }
+.wfg-step.done .wfg-lbl { color: var(--ink-2); }
+.wfg-hint { display: flex; align-items: flex-start; gap: 7px; margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--line); font-size: 13.5px; color: var(--ink); line-height: 1.5; }
+.wfg-hint > i { color: var(--brand); margin-top: 2px; flex-shrink: 0; }
