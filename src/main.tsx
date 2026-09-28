@@ -4980,54 +4980,71 @@ function LeadsList({ onBack, onStart }: { onBack: () => void; onStart: (lead: an
   )
 }
 
-// ── LANÇAR — registar uma despesa ou receita no dia-a-dia ────
-// O formulário adapta-se ao departamento: oficina e remaps pedem o
-// carro; loja e custos gerais não. É a Ponta A da conciliação.
-const LANC_KINDS = ['JO', 'Staff', 'Oficina', 'Transporte', 'Peças', 'Licença', 'Contabilidade', 'Imposto', 'Consumíveis', 'Outro']
+// ── LANÇAR — registar um movimento no dia-a-dia ──────────────
+// Despesa, receita ou movimento interno (não conta no resultado).
+// Categoria agrupada (plano configurável por oficina), departamento
+// (ou transversal), meio de pagamento, e o carro quando o departamento
+// trabalha em carros. É a Ponta A da conciliação.
+const LANC_METHODS: [string, string][] = [['bank', 'Banco'], ['cash', 'Caixa (dinheiro)'], ['mpesa', 'M-Pesa'], ['emola', 'e-Mola'], ['card', 'Cartão']]
+const LANC_METHOD_LABEL: Record<string, string> = Object.fromEntries(LANC_METHODS)
 function Lancar({ onBack }: { onBack: () => void }) {
+  const hoje = new Date().toISOString().slice(0, 10)
+  const vazio = { entryDate: hoje, flow: 'cost', neutralDir: 'out', categoryId: '', departmentId: '', isTransversal: false,
+    paymentMethod: 'bank', amount: '', description: '', counterparty: '', plate: '', make: '', model: '', engine: '' }
+  const [f, setF] = useState<any>(vazio)
   const [depts, setDepts] = useState<any[]>([])
-  const [f, setF] = useState<any>({
-    entryDate: new Date().toISOString().slice(0, 10),
-    businessUnitId: '', isTransversal: false,
-    kind: '', description: '', counterparty: '',
-    plate: '', make: '', model: '', engine: '',
-    flow: 'cost', amount: '',
-  })
+  const [cats, setCats] = useState<any[]>([])
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
   const [recentes, setRecentes] = useState<any[]>([])
 
-  const loadRecentes = () => api('/api/v1/ledger').then(r => setRecentes((r.entries || []).slice(0, 6))).catch(() => {})
+  const loadRecentes = () => api('/api/v1/ledger').then(r => setRecentes((r.entries || []).slice(0, 8))).catch(() => {})
   useEffect(() => {
     api('/api/v1/ledger/departments').then(r => setDepts(r.departments || [])).catch(() => {})
+    api('/api/v1/ledger/categories').then(r => setCats(r.categories || [])).catch(() => {})
     loadRecentes()
   }, [])
 
-  // o departamento escolhido é de carro? (oficina/remaps têm carro; loja/geral não)
-  const deptSel = depts.find((d: any) => d.id === f.businessUnitId)
-  const temCarro = !f.isTransversal && deptSel && /oficina|remap/i.test(deptSel.name + ' ' + (deptSel.type || ''))
+  const catsDoSentido = cats.filter((c: any) => c.flow === f.flow)
+  const grupos: [string, any[]][] = []
+  for (const c of catsDoSentido) {
+    const g = grupos.find(x => x[0] === c.group_name)
+    if (g) g[1].push(c); else grupos.push([c.group_name, [c]])
+  }
+  const catSel = cats.find((c: any) => c.id === f.categoryId)
+  const deptSel = depts.find((d: any) => d.id === f.departmentId)
+  const neutral = f.flow === 'neutral'
+  const temCarro = !neutral && !f.isTransversal && deptSel?.tracks_vehicles
+
+  const mudarSentido = (flow: string) => setF({ ...f, flow, categoryId: '' })
 
   const lancar = async () => {
-    const val = parseFloat(f.amount)
-    if (!f.isTransversal && !f.businessUnitId) { setMsg({ kind: 'err', text: 'Escolhe o departamento.' }); return }
+    const val = parseFloat(String(f.amount).replace(',', '.'))
     if (isNaN(val) || val <= 0) { setMsg({ kind: 'err', text: 'Escreve o valor.' }); return }
+    if (!f.categoryId) { setMsg({ kind: 'err', text: 'Escolhe a categoria.' }); return }
+    if (!neutral && !f.isTransversal && !f.departmentId) { setMsg({ kind: 'err', text: 'Escolhe o departamento (ou transversal).' }); return }
+    const entra = f.flow === 'revenue' || (neutral && f.neutralDir === 'in')
     setBusy(true); setMsg(null)
     try {
       await api('/api/v1/ledger', { method: 'POST', body: JSON.stringify({
-        entryDate: f.entryDate,
-        businessUnitId: f.isTransversal ? null : (f.businessUnitId || null),
-        isTransversal: f.isTransversal,
-        kind: f.kind || null, description: f.description || null, counterparty: f.counterparty || null,
+        entryDate: f.entryDate, categoryId: f.categoryId,
+        departmentId: neutral || f.isTransversal ? null : f.departmentId, isTransversal: !neutral && f.isTransversal,
+        paymentMethod: f.paymentMethod || null,
+        description: f.description || null, counterparty: f.counterparty || null,
         plate: temCarro ? (f.plate || null) : null, make: temCarro ? (f.make || null) : null,
         model: temCarro ? (f.model || null) : null, engine: temCarro ? (f.engine || null) : null,
-        cost: f.flow === 'cost' ? val : 0, revenue: f.flow === 'revenue' ? val : 0,
+        cost: entra ? 0 : val, revenue: entra ? val : 0,
       }) })
       setMsg({ kind: 'ok', text: 'Lançado.' })
-      setF({ ...f, description: '', counterparty: '', plate: '', make: '', model: '', engine: '', amount: '' })
+      // mantém sentido, data, departamento e meio — acelera lançar vários seguidos
+      setF({ ...vazio, flow: f.flow, neutralDir: f.neutralDir, entryDate: f.entryDate, departmentId: f.departmentId,
+        isTransversal: f.isTransversal, paymentMethod: f.paymentMethod })
       loadRecentes()
     } catch (e: any) { setMsg({ kind: 'err', text: e?.message || 'Não guardou.' }) }
     finally { setBusy(false) }
   }
+
+  const sinal = (r: any) => Number(r.revenue) > 0 ? 'in' : 'out'
 
   return (
     <main className="reception">
@@ -5036,65 +5053,91 @@ function Lancar({ onBack }: { onBack: () => void }) {
         <h2 style={{ margin: 0, fontSize: 20 }}>Lançar</h2><span />
       </div>
 
-      <div className="banner i" style={{ marginBottom: 14 }}>
-        <span style={{ fontWeight: 700, display: 'block', marginBottom: 3 }}>Regista no momento</span>
-        Lança uma despesa ou receita agora. No fim do mês cruzas com o extrato — o que já lançaste aqui aparece feito.
-      </div>
-
       {msg && <div className={`banner ${msg.kind === 'ok' ? 'ok' : 'err'}`} style={{ marginBottom: 12 }}>{msg.text}</div>}
 
       <div className="card">
-        {/* custo ou receita */}
         <div className="lanc-flow">
-          <button className={`lanc-flow-btn ${f.flow === 'cost' ? 'on cost' : ''}`} onClick={() => setF({ ...f, flow: 'cost' })}>
-            <i className="ti ti-arrow-down-left" aria-hidden="true"></i> Despesa (saída)
+          <button className={`lanc-flow-btn ${f.flow === 'cost' ? 'on cost' : ''}`} onClick={() => mudarSentido('cost')}>
+            <i className="ti ti-arrow-down-left" aria-hidden="true"></i> Despesa
           </button>
-          <button className={`lanc-flow-btn ${f.flow === 'revenue' ? 'on rev' : ''}`} onClick={() => setF({ ...f, flow: 'revenue' })}>
-            <i className="ti ti-arrow-up-right" aria-hidden="true"></i> Receita (entrada)
+          <button className={`lanc-flow-btn ${f.flow === 'revenue' ? 'on rev' : ''}`} onClick={() => mudarSentido('revenue')}>
+            <i className="ti ti-arrow-up-right" aria-hidden="true"></i> Receita
+          </button>
+          <button className={`lanc-flow-btn ${f.flow === 'neutral' ? 'on neu' : ''}`} onClick={() => mudarSentido('neutral')}>
+            <i className="ti ti-arrows-exchange" aria-hidden="true"></i> Interno
           </button>
         </div>
-
-        <label className="fl" style={{ marginTop: 12 }}>Valor (MT)</label>
-        <input type="number" inputMode="decimal" value={f.amount} onChange={e => setF({ ...f, amount: e.target.value })} placeholder="0" autoFocus />
-
-        <label className="fl" style={{ marginTop: 10 }}>Data</label>
-        <input type="date" value={f.entryDate} onChange={e => setF({ ...f, entryDate: e.target.value })} />
-
-        <label className="fl" style={{ marginTop: 10 }}>Departamento</label>
-        <select value={f.isTransversal ? '__t' : f.businessUnitId} onChange={e => {
-          if (e.target.value === '__t') setF({ ...f, isTransversal: true, businessUnitId: '' })
-          else setF({ ...f, isTransversal: false, businessUnitId: e.target.value })
-        }}>
-          <option value="">— escolher —</option>
-          {depts.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          <option value="__t">Transversal (todos os departamentos)</option>
-        </select>
-
-        <label className="fl" style={{ marginTop: 10 }}>Tipo</label>
-        <select value={f.kind} onChange={e => setF({ ...f, kind: e.target.value })}>
-          <option value="">— escolher —</option>
-          {LANC_KINDS.map(k => <option key={k} value={k}>{k}</option>)}
-        </select>
-
-        {temCarro && (
-          <div className="lanc-carro">
-            <div className="lanc-carro-title"><i className="ti ti-car" aria-hidden="true"></i> Carro (opcional)</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <div style={{ flex: 1 }}><label className="fl">Matrícula</label><input value={f.plate} onChange={e => setF({ ...f, plate: e.target.value })} placeholder="ABC-123" /></div>
-              <div style={{ flex: 1 }}><label className="fl">Motor</label><input value={f.engine} onChange={e => setF({ ...f, engine: e.target.value })} placeholder="2.0" /></div>
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-              <div style={{ flex: 1 }}><label className="fl">Marca</label><input value={f.make} onChange={e => setF({ ...f, make: e.target.value })} placeholder="BMW" /></div>
-              <div style={{ flex: 1 }}><label className="fl">Modelo</label><input value={f.model} onChange={e => setF({ ...f, model: e.target.value })} placeholder="120i" /></div>
+        {neutral && (
+          <div className="lanc-neutral-note">
+            Transferências, reforços de caixa, adiantamentos. Ficam registados mas <strong>não contam</strong> como receita nem despesa.
+            <div className="lanc-dir">
+              <button className={f.neutralDir === 'in' ? 'on' : ''} onClick={() => setF({ ...f, neutralDir: 'in' })}>Entrou dinheiro</button>
+              <button className={f.neutralDir === 'out' ? 'on' : ''} onClick={() => setF({ ...f, neutralDir: 'out' })}>Saiu dinheiro</button>
             </div>
           </div>
         )}
 
-        <label className="fl" style={{ marginTop: 10 }}>Descrição</label>
-        <input value={f.description} onChange={e => setF({ ...f, description: e.target.value })} placeholder="ex: calços + fumo, salário, transporte Komati…" />
+        <div className="lanc-row2">
+          <div>
+            <label className="fl">Valor (MT)</label>
+            <input type="number" inputMode="decimal" value={f.amount} onChange={e => setF({ ...f, amount: e.target.value })} placeholder="0" autoFocus />
+          </div>
+          <div>
+            <label className="fl">Data</label>
+            <input type="date" value={f.entryDate} onChange={e => setF({ ...f, entryDate: e.target.value })} />
+          </div>
+        </div>
 
-        <label className="fl" style={{ marginTop: 10 }}>Cliente / fornecedor (opcional)</label>
-        <input value={f.counterparty} onChange={e => setF({ ...f, counterparty: e.target.value })} placeholder="a quem / de quem" />
+        <label className="fl" style={{ marginTop: 10 }}>Categoria</label>
+        <select value={f.categoryId} onChange={e => setF({ ...f, categoryId: e.target.value })}>
+          <option value="">— escolher —</option>
+          {grupos.map(([g, lista]) => (
+            <optgroup key={g} label={g}>
+              {lista.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </optgroup>
+          ))}
+        </select>
+        {catSel?.nature && <div className="lanc-nature">{catSel.nature === 'fixed' ? 'Custo fixo — repete-se todos os meses' : 'Custo variável'}</div>}
+
+        {!neutral && (
+          <>
+            <label className="fl" style={{ marginTop: 10 }}>Departamento</label>
+            <div className="lanc-depts">
+              {depts.map((d: any) => (
+                <button key={d.id} className={!f.isTransversal && f.departmentId === d.id ? 'on' : ''}
+                  onClick={() => setF({ ...f, departmentId: d.id, isTransversal: false })}>{d.name}</button>
+              ))}
+              <button className={f.isTransversal ? 'on' : ''} onClick={() => setF({ ...f, isTransversal: true, departmentId: '' })}>Transversal</button>
+            </div>
+            {f.isTransversal && <div className="lanc-nature">Custo de todos os departamentos (ex.: contabilista). A divisão por percentagens entra no painel.</div>}
+          </>
+        )}
+
+        {temCarro && (
+          <div className="lanc-carro">
+            <div className="lanc-carro-title"><i className="ti ti-car" aria-hidden="true"></i> Carro (opcional)</div>
+            <div className="lanc-row2">
+              <div><label className="fl">Matrícula</label><input value={f.plate} onChange={e => setF({ ...f, plate: e.target.value })} placeholder="ABC-123-MC" /></div>
+              <div><label className="fl">Motor</label><input value={f.engine} onChange={e => setF({ ...f, engine: e.target.value })} placeholder="2.0 Turbo" /></div>
+            </div>
+            <div className="lanc-row2" style={{ marginTop: 8 }}>
+              <div><label className="fl">Marca</label><input value={f.make} onChange={e => setF({ ...f, make: e.target.value })} placeholder="BMW" /></div>
+              <div><label className="fl">Modelo</label><input value={f.model} onChange={e => setF({ ...f, model: e.target.value })} placeholder="120i" /></div>
+            </div>
+          </div>
+        )}
+
+        <label className="fl" style={{ marginTop: 10 }}>Pago / recebido por</label>
+        <select value={f.paymentMethod} onChange={e => setF({ ...f, paymentMethod: e.target.value })}>
+          {LANC_METHODS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        </select>
+        {f.paymentMethod === 'cash' && <div className="lanc-nature">Caixa não aparece no extrato do banco — vai precisar da tua validação.</div>}
+
+        <label className="fl" style={{ marginTop: 10 }}>Descrição</label>
+        <input value={f.description} onChange={e => setF({ ...f, description: e.target.value })} placeholder="o que foi, em poucas palavras" />
+
+        <label className="fl" style={{ marginTop: 10 }}>{f.flow === 'revenue' ? 'Cliente' : f.flow === 'cost' ? 'Fornecedor / a quem' : 'Origem / destino'} (opcional)</label>
+        <input value={f.counterparty} onChange={e => setF({ ...f, counterparty: e.target.value })} />
 
         <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 16 }} disabled={busy} onClick={lancar}>
           {busy ? 'A lançar…' : 'Lançar'}
@@ -5106,13 +5149,19 @@ function Lancar({ onBack }: { onBack: () => void }) {
           <div className="det-section-title" style={{ marginTop: 18 }}>Últimos lançamentos</div>
           <div className="lanc-recent">
             {recentes.map((r: any) => (
-              <div key={r.id} className="lanc-recent-row">
+              <div key={r.id} className={`lanc-recent-row ${r.counts_in_result === false ? 'neutral' : ''}`}>
                 <div>
-                  <div className="lanc-recent-desc">{r.description || r.kind || '—'}{r.plate ? ` · ${r.plate}` : ''}</div>
-                  <div className="sub">{r.department || (r.is_transversal ? 'Transversal' : '')}{r.entry_date ? ` · ${new Date(r.entry_date).toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' })}` : ''}</div>
+                  <div className="lanc-recent-desc">{r.category_name || r.category || '—'}{r.plate ? ` · ${r.plate}` : ''}</div>
+                  <div className="sub">
+                    {[r.description,
+                      r.department || (r.is_transversal ? 'Transversal' : null),
+                      r.payment_method ? LANC_METHOD_LABEL[r.payment_method] : null,
+                      r.entry_date ? new Date(r.entry_date).toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' }) : null,
+                    ].filter(Boolean).join(' · ')}
+                  </div>
                 </div>
-                <div className={`lanc-recent-val ${Number(r.revenue) > 0 ? 'rev' : 'cost'}`}>
-                  {Number(r.revenue) > 0 ? '+' : '−'}{Number(r.revenue || r.cost).toLocaleString('pt-PT')} MT
+                <div className={`lanc-recent-val ${r.counts_in_result === false ? 'neu' : sinal(r) === 'in' ? 'rev' : 'cost'}`}>
+                  {sinal(r) === 'in' ? '+' : '−'}{Number(Number(r.revenue) > 0 ? r.revenue : r.cost).toLocaleString('pt-PT')} MT
                 </div>
               </div>
             ))}
