@@ -102,7 +102,7 @@ function Shell() {
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
   const [temUpdate, setTemUpdate] = useState(false)   // há versão nova à espera
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates' | 'ppi-model' | 'suppliers' | 'qcqueue' | 'admin' | 'quickbooking' | 'leads'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates' | 'ppi-model' | 'suppliers' | 'qcqueue' | 'admin' | 'quickbooking' | 'leads' | 'lancar'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [leadPrefill, setLeadPrefill] = useState<any>(undefined)   // dados da marcação rápida + modo
   const [listFilter, setListFilter] = useState<'all' | 'diagnosis' | 'working' | 'ready' | 'delivered'>('all')
@@ -235,6 +235,11 @@ function Shell() {
             <i className="ti ti-key" aria-hidden="true"></i><span className="nav-label">A minha senha</span>
           </button>
           {isOwner && (
+            <button className={`nav-item ${view === 'lancar' ? 'active' : ''}`} onClick={() => go('lancar')}>
+              <i className="ti ti-cash-banknote" aria-hidden="true"></i><span className="nav-label">Lançar</span>
+            </button>
+          )}
+          {isOwner && (
             <button className={`nav-item ${view === 'errorlogs' ? 'active' : ''}`} onClick={() => go('errorlogs')}>
               <i className="ti ti-bug" aria-hidden="true"></i><span className="nav-label">Diagnóstico</span>
             </button>
@@ -365,6 +370,7 @@ function Shell() {
       {view === 'queue' && <SyncQueue onBack={() => setView('home')} />}
       {view === 'servicetypes' && <ServiceTypes onBack={() => setView('home')} />}
       {view === 'password' && <ChangePassword onBack={() => setView('home')} />}
+      {view === 'lancar' && <Lancar onBack={() => setView('home')} />}
       {view === 'errorlogs' && <ErrorLogs onBack={() => setView('home')} />}
       {view === 'tasks' && <Tasks onBack={() => setView('home')} isOwner={isOwner} myId={user?.id || ''} />}
 
@@ -4974,6 +4980,149 @@ function LeadsList({ onBack, onStart }: { onBack: () => void; onStart: (lead: an
   )
 }
 
+// ── LANÇAR — registar uma despesa ou receita no dia-a-dia ────
+// O formulário adapta-se ao departamento: oficina e remaps pedem o
+// carro; loja e custos gerais não. É a Ponta A da conciliação.
+const LANC_KINDS = ['JO', 'Staff', 'Oficina', 'Transporte', 'Peças', 'Licença', 'Contabilidade', 'Imposto', 'Consumíveis', 'Outro']
+function Lancar({ onBack }: { onBack: () => void }) {
+  const [depts, setDepts] = useState<any[]>([])
+  const [f, setF] = useState<any>({
+    entryDate: new Date().toISOString().slice(0, 10),
+    businessUnitId: '', isTransversal: false,
+    kind: '', description: '', counterparty: '',
+    plate: '', make: '', model: '', engine: '',
+    flow: 'cost', amount: '',
+  })
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
+  const [recentes, setRecentes] = useState<any[]>([])
+
+  const loadRecentes = () => api('/api/v1/ledger').then(r => setRecentes((r.entries || []).slice(0, 6))).catch(() => {})
+  useEffect(() => {
+    api('/api/v1/ledger/departments').then(r => setDepts(r.departments || [])).catch(() => {})
+    loadRecentes()
+  }, [])
+
+  // o departamento escolhido é de carro? (oficina/remaps têm carro; loja/geral não)
+  const deptSel = depts.find((d: any) => d.id === f.businessUnitId)
+  const temCarro = !f.isTransversal && deptSel && /oficina|remap/i.test(deptSel.name + ' ' + (deptSel.type || ''))
+
+  const lancar = async () => {
+    const val = parseFloat(f.amount)
+    if (!f.isTransversal && !f.businessUnitId) { setMsg({ kind: 'err', text: 'Escolhe o departamento.' }); return }
+    if (isNaN(val) || val <= 0) { setMsg({ kind: 'err', text: 'Escreve o valor.' }); return }
+    setBusy(true); setMsg(null)
+    try {
+      await api('/api/v1/ledger', { method: 'POST', body: JSON.stringify({
+        entryDate: f.entryDate,
+        businessUnitId: f.isTransversal ? null : (f.businessUnitId || null),
+        isTransversal: f.isTransversal,
+        kind: f.kind || null, description: f.description || null, counterparty: f.counterparty || null,
+        plate: temCarro ? (f.plate || null) : null, make: temCarro ? (f.make || null) : null,
+        model: temCarro ? (f.model || null) : null, engine: temCarro ? (f.engine || null) : null,
+        cost: f.flow === 'cost' ? val : 0, revenue: f.flow === 'revenue' ? val : 0,
+      }) })
+      setMsg({ kind: 'ok', text: 'Lançado.' })
+      setF({ ...f, description: '', counterparty: '', plate: '', make: '', model: '', engine: '', amount: '' })
+      loadRecentes()
+    } catch (e: any) { setMsg({ kind: 'err', text: e?.message || 'Não guardou.' }) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <main className="reception">
+      <div className="rec-top" style={{ marginBottom: 16 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
+        <h2 style={{ margin: 0, fontSize: 20 }}>Lançar</h2><span />
+      </div>
+
+      <div className="banner i" style={{ marginBottom: 14 }}>
+        <span style={{ fontWeight: 700, display: 'block', marginBottom: 3 }}>Regista no momento</span>
+        Lança uma despesa ou receita agora. No fim do mês cruzas com o extrato — o que já lançaste aqui aparece feito.
+      </div>
+
+      {msg && <div className={`banner ${msg.kind === 'ok' ? 'ok' : 'err'}`} style={{ marginBottom: 12 }}>{msg.text}</div>}
+
+      <div className="card">
+        {/* custo ou receita */}
+        <div className="lanc-flow">
+          <button className={`lanc-flow-btn ${f.flow === 'cost' ? 'on cost' : ''}`} onClick={() => setF({ ...f, flow: 'cost' })}>
+            <i className="ti ti-arrow-down-left" aria-hidden="true"></i> Despesa (saída)
+          </button>
+          <button className={`lanc-flow-btn ${f.flow === 'revenue' ? 'on rev' : ''}`} onClick={() => setF({ ...f, flow: 'revenue' })}>
+            <i className="ti ti-arrow-up-right" aria-hidden="true"></i> Receita (entrada)
+          </button>
+        </div>
+
+        <label className="fl" style={{ marginTop: 12 }}>Valor (MT)</label>
+        <input type="number" inputMode="decimal" value={f.amount} onChange={e => setF({ ...f, amount: e.target.value })} placeholder="0" autoFocus />
+
+        <label className="fl" style={{ marginTop: 10 }}>Data</label>
+        <input type="date" value={f.entryDate} onChange={e => setF({ ...f, entryDate: e.target.value })} />
+
+        <label className="fl" style={{ marginTop: 10 }}>Departamento</label>
+        <select value={f.isTransversal ? '__t' : f.businessUnitId} onChange={e => {
+          if (e.target.value === '__t') setF({ ...f, isTransversal: true, businessUnitId: '' })
+          else setF({ ...f, isTransversal: false, businessUnitId: e.target.value })
+        }}>
+          <option value="">— escolher —</option>
+          {depts.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          <option value="__t">Transversal (todos os departamentos)</option>
+        </select>
+
+        <label className="fl" style={{ marginTop: 10 }}>Tipo</label>
+        <select value={f.kind} onChange={e => setF({ ...f, kind: e.target.value })}>
+          <option value="">— escolher —</option>
+          {LANC_KINDS.map(k => <option key={k} value={k}>{k}</option>)}
+        </select>
+
+        {temCarro && (
+          <div className="lanc-carro">
+            <div className="lanc-carro-title"><i className="ti ti-car" aria-hidden="true"></i> Carro (opcional)</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}><label className="fl">Matrícula</label><input value={f.plate} onChange={e => setF({ ...f, plate: e.target.value })} placeholder="ABC-123" /></div>
+              <div style={{ flex: 1 }}><label className="fl">Motor</label><input value={f.engine} onChange={e => setF({ ...f, engine: e.target.value })} placeholder="2.0" /></div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <div style={{ flex: 1 }}><label className="fl">Marca</label><input value={f.make} onChange={e => setF({ ...f, make: e.target.value })} placeholder="BMW" /></div>
+              <div style={{ flex: 1 }}><label className="fl">Modelo</label><input value={f.model} onChange={e => setF({ ...f, model: e.target.value })} placeholder="120i" /></div>
+            </div>
+          </div>
+        )}
+
+        <label className="fl" style={{ marginTop: 10 }}>Descrição</label>
+        <input value={f.description} onChange={e => setF({ ...f, description: e.target.value })} placeholder="ex: calços + fumo, salário, transporte Komati…" />
+
+        <label className="fl" style={{ marginTop: 10 }}>Cliente / fornecedor (opcional)</label>
+        <input value={f.counterparty} onChange={e => setF({ ...f, counterparty: e.target.value })} placeholder="a quem / de quem" />
+
+        <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 16 }} disabled={busy} onClick={lancar}>
+          {busy ? 'A lançar…' : 'Lançar'}
+        </button>
+      </div>
+
+      {recentes.length > 0 && (
+        <>
+          <div className="det-section-title" style={{ marginTop: 18 }}>Últimos lançamentos</div>
+          <div className="lanc-recent">
+            {recentes.map((r: any) => (
+              <div key={r.id} className="lanc-recent-row">
+                <div>
+                  <div className="lanc-recent-desc">{r.description || r.kind || '—'}{r.plate ? ` · ${r.plate}` : ''}</div>
+                  <div className="sub">{r.department || (r.is_transversal ? 'Transversal' : '')}{r.entry_date ? ` · ${new Date(r.entry_date).toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' })}` : ''}</div>
+                </div>
+                <div className={`lanc-recent-val ${Number(r.revenue) > 0 ? 'rev' : 'cost'}`}>
+                  {Number(r.revenue) > 0 ? '+' : '−'}{Number(r.revenue || r.cost).toLocaleString('pt-PT')} MT
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </main>
+  )
+}
+
 // ── PAINEL DO SUPER-ADMIN — criar e gerir oficinas ───────────
 function AdminWorkshops({ onBack }: { onBack: () => void }) {
   const [list, setList] = useState<any[]>([])
@@ -5389,6 +5538,25 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
           {(data?.team || []).map((m: any) => <option key={m.id} value={m.id}>{m.full_name}</option>)}
         </select>
       </div>
+
+      {!['ready', 'quality_check', 'delivered', 'cancelled', 'draft', 'reception'].includes(jo.status) && (
+        <div className="start-qc-box">
+          <div className="start-qc-txt">
+            <i className="ti ti-shield-check" aria-hidden="true"></i>
+            <span>Quando o trabalho estiver feito, faz o controlo de qualidade de saída. Podes iniciá-lo já, mesmo que o carro ainda não tenha chegado aqui pelo fluxo normal.</span>
+          </div>
+          <button className="btn-primary btn-sm" onClick={() => setAsk({
+            text: `Este carro está em "${STATUS_LABEL[jo.status] || jo.status}". Iniciar o controlo de qualidade de saída na mesma?`,
+            yes: 'Iniciar QC',
+            run: async () => {
+              try { await api(`/api/v1/os/${jo.id}/start-qc`, { method: 'POST' }); await load(); say('ok', 'Controlo de qualidade iniciado.') }
+              catch (e: any) { say('err', e?.message || 'Não foi possível iniciar o QC.') }
+            },
+          })}>
+            <i className="ti ti-shield-check" aria-hidden="true"></i> Iniciar QC de saída
+          </button>
+        </div>
+      )}
 
       {['ready', 'quality_check'].includes(jo.status) && (
         <QCPanel joId={jo.id} say={say} onDelivered={load} />

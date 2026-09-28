@@ -1251,3 +1251,23 @@ textarea { resize: vertical; line-height: 1.55; }
 .wfg-step.done .wfg-lbl { color: var(--ink-2); }
 .wfg-hint { display: flex; align-items: flex-start; gap: 7px; margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--line); font-size: 13.5px; color: var(--ink); line-height: 1.5; }
 .wfg-hint > i { color: var(--brand); margin-top: 2px; flex-shrink: 0; }
+
+/* Iniciar QC de saída (a partir de qualquer estádio) */
+.start-qc-box { display: flex; align-items: center; gap: 12px; justify-content: space-between; flex-wrap: wrap; background: var(--brand-bg); border: 1px solid var(--brand-border); border-radius: var(--radius); padding: 13px 15px; margin-top: 14px; }
+.start-qc-txt { display: flex; align-items: flex-start; gap: 9px; font-size: 13px; color: var(--ink-2); line-height: 1.45; flex: 1; min-width: 220px; }
+.start-qc-txt > i { color: var(--brand); font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+
+/* ── Lançar (menu financeiro rápido) ── */
+.lanc-flow { display: flex; gap: 8px; }
+.lanc-flow-btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 11px 8px; border: 1.5px solid var(--line-2); border-radius: var(--radius-sm); background: var(--s1); color: var(--ink-2); font-size: 13.5px; font-weight: 600; cursor: pointer; }
+.lanc-flow-btn.on.cost { border-color: #DC2626; background: #FEF2F2; color: #B91C1C; }
+.lanc-flow-btn.on.rev { border-color: #15803D; background: #F0FDF4; color: #15803D; }
+.lanc-carro { margin-top: 12px; padding: 12px; background: var(--brand-bg); border: 1px solid var(--brand-border); border-radius: var(--radius-sm); }
+.lanc-carro-title { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: var(--brand); margin-bottom: 8px; }
+.lanc-recent { border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+.lanc-recent-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 13px; border-bottom: 1px solid var(--line); }
+.lanc-recent-row:last-child { border-bottom: none; }
+.lanc-recent-desc { font-size: 14px; color: var(--ink); font-weight: 500; }
+.lanc-recent-val { font-size: 14px; font-weight: 700; white-space: nowrap; }
+.lanc-recent-val.rev { color: #15803D; }
+.lanc-recent-val.cost { color: #B91C1C; }
