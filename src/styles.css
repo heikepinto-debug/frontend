@@ -1285,3 +1285,69 @@ textarea { resize: vertical; line-height: 1.55; }
 .lanc-nature { font-size: 11.5px; color: var(--ink-3); margin-top: 4px; }
 .lanc-recent-row.neutral { background: var(--s2); }
 .lanc-recent-val.neu { color: var(--ink-3); }
+
+/* ── Campo de montante (MT) ── */
+.money-input { position: relative; }
+.money-input input { width: 100%; box-sizing: border-box; text-align: right; padding-right: 40px; font-variant-numeric: tabular-nums; font-weight: 600; }
+.money-suffix { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 12px; font-weight: 700; color: var(--ink-3); pointer-events: none; }
+
+/* ── Gestão (painel do dono) ── */
+.g-mes { display: flex; align-items: center; justify-content: space-between; background: var(--s1); border: 1px solid var(--line-2); border-radius: var(--radius); padding: 6px; margin-bottom: 12px; font-weight: 700; font-size: 15px; color: var(--ink); }
+.g-hero { border-radius: var(--radius); padding: 18px 18px 16px; margin-bottom: 12px; background: var(--s1); border: 1px solid var(--line-2); text-align: center; }
+.g-hero.pos { background: #F0FDF4; border-color: #BBF7D0; }
+.g-hero.neg { background: #FEF2F2; border-color: #FECACA; }
+.g-hero-lbl { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-3); }
+.g-hero-val { font-size: 32px; font-weight: 800; margin: 4px 0 8px; font-variant-numeric: tabular-nums; color: var(--ink); }
+.g-hero.pos .g-hero-val { color: #15803D; }
+.g-hero.neg .g-hero-val { color: #B91C1C; }
+.g-hero-sub { display: flex; justify-content: center; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.g-alertas { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.g-alerta { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 9px 12px; border-radius: var(--radius-sm); line-height: 1.4; }
+.g-alerta.warn { background: #FFFBEB; color: #92400E; border: 1px solid #FDE68A; }
+.g-alerta.info { background: var(--brand-bg); color: var(--ink); border: 1px solid var(--brand-border); }
+.g-depts { display: flex; flex-direction: column; gap: 8px; }
+.g-dept { background: var(--s1); border: 1px solid var(--line-2); border-radius: var(--radius-sm); padding: 11px 13px; }
+.g-dept.transv { border-style: dashed; }
+.g-dept-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.g-dept-nome { font-weight: 700; font-size: 14.5px; color: var(--ink); }
+.g-val { font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+.g-val.pos { color: #15803D; } .g-val.neg { color: #B91C1C; }
+.g-dept-linhas { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.g-divisao { margin-top: 8px; }
+.g-div-linha { display: grid; grid-template-columns: 1fr 90px 18px; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 14px; }
+.g-div-linha input { text-align: right; }
+.g-div-soma { text-align: right; font-size: 13px; font-weight: 700; color: #B91C1C; }
+.g-div-soma.ok { color: #15803D; }
+.g-fv-bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--s2); }
+.g-fv-bar .fx, .dot.fx { background: var(--brand); }
+.g-fv-bar .vr, .dot.vr { background: #F59E0B; }
+.g-fv-bar .sn, .dot.sn { background: #9CA3AF; }
+.g-fv-leg { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.g-fv-leg span { display: inline-flex; align-items: center; gap: 5px; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+.g-grupos { margin-top: 14px; display: flex; flex-direction: column; gap: 9px; }
+.g-grupo-top { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.g-grupo-bar { height: 6px; background: var(--s2); border-radius: 3px; margin-top: 3px; overflow: hidden; }
+.g-grupo-bar div { height: 100%; background: var(--brand); border-radius: 3px; }
+.g-mini { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.g-mini-card { flex: 1 1 160px; display: flex; align-items: center; gap: 10px; background: var(--s1); border: 1px solid var(--line-2); border-radius: var(--radius-sm); padding: 10px 12px; }
+.g-mini-card > i { font-size: 20px; color: var(--brand); }
+.g-mini-card strong { display: block; font-size: 15px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.g-mini-card span { font-size: 11.5px; color: var(--ink-3); }
+.g-meses { display: flex; gap: 6px; align-items: flex-end; }
+.g-mes-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px; cursor: pointer; font-size: 11px; color: var(--ink-3); text-transform: capitalize; }
+.g-mes-area { height: 80px; width: 100%; display: flex; align-items: flex-end; justify-content: center; }
+.g-mes-barra { width: 70%; max-width: 34px; border-radius: 4px 4px 0 0; opacity: .55; }
+.g-mes-barra.pos { background: #15803D; } .g-mes-barra.neg { background: #B91C1C; }
+.g-mes-barra.atual { opacity: 1; }
+.g-mov-main { flex: 1; min-width: 0; }
+.g-mov-dir { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.g-tag { font-size: 10px; font-weight: 700; color: var(--brand); background: var(--brand-bg); padding: 1px 7px; border-radius: 8px; margin-left: 6px; }
+.g-tic { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 700; border: 1px solid #FDE68A; background: #FFFBEB; color: #92400E; border-radius: 10px; padding: 2px 8px; cursor: pointer; }
+.g-tic.on { border-color: #BBF7D0; background: #F0FDF4; color: #15803D; }
+.click { cursor: pointer; }
+.lanc-recent-row.click:hover, .g-mov-main.click:hover { background: var(--s2); }
+.lanc-recent-row.editing { outline: 2px solid var(--brand); outline-offset: -2px; }
+.lanc-edit-actions { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin-top: 16px; }
+.lanc-edit-actions .btn-primary { justify-content: center; }
+.lanc-del { color: #B91C1C; }

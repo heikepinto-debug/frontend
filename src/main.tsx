@@ -102,7 +102,7 @@ function Shell() {
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
   const [temUpdate, setTemUpdate] = useState(false)   // há versão nova à espera
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates' | 'ppi-model' | 'suppliers' | 'qcqueue' | 'admin' | 'quickbooking' | 'leads' | 'lancar'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates' | 'ppi-model' | 'suppliers' | 'qcqueue' | 'admin' | 'quickbooking' | 'leads' | 'lancar' | 'gestao'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [leadPrefill, setLeadPrefill] = useState<any>(undefined)   // dados da marcação rápida + modo
   const [listFilter, setListFilter] = useState<'all' | 'diagnosis' | 'working' | 'ready' | 'delivered'>('all')
@@ -110,7 +110,8 @@ function Shell() {
   const [osId, setOsId] = useState<string | undefined>(undefined)
   const [ppiJoId, setPpiJoId] = useState<string | null>(null)
   const [ppiReturnTo, setPpiReturnTo] = useState<'list' | 'ppi-list'>('list')
-  const [osReturnTo, setOsReturnTo] = useState<'list' | 'authorizations' | 'detail' | 'qcqueue'>('list')
+  const [osReturnTo, setOsReturnTo] = useState<'list' | 'authorizations' | 'detail' | 'qcqueue' | 'gestao'>('list')
+  const [ledgerEdit, setLedgerEdit] = useState<any>(undefined)   // lançamento aberto a partir do painel
   const [signId, setSignId] = useState<string | undefined>(undefined)
   const [completeId, setCompleteId] = useState<string | undefined>(undefined)
   const [bookingCount, setBookingCount] = useState(0)
@@ -234,6 +235,11 @@ function Shell() {
           <button className={`nav-item ${view === 'password' ? 'active' : ''}`} onClick={() => go('password')}>
             <i className="ti ti-key" aria-hidden="true"></i><span className="nav-label">A minha senha</span>
           </button>
+          {isOwner && (
+            <button className={`nav-item ${view === 'gestao' ? 'active' : ''}`} onClick={() => go('gestao')}>
+              <i className="ti ti-report-analytics" aria-hidden="true"></i><span className="nav-label">Gestão</span>
+            </button>
+          )}
           {isOwner && (
             <button className={`nav-item ${view === 'lancar' ? 'active' : ''}`} onClick={() => go('lancar')}>
               <i className="ti ti-cash-banknote" aria-hidden="true"></i><span className="nav-label">Lançar</span>
@@ -370,7 +376,13 @@ function Shell() {
       {view === 'queue' && <SyncQueue onBack={() => setView('home')} />}
       {view === 'servicetypes' && <ServiceTypes onBack={() => setView('home')} />}
       {view === 'password' && <ChangePassword onBack={() => setView('home')} />}
-      {view === 'lancar' && <Lancar onBack={() => setView('home')} />}
+      {view === 'gestao' && <Gestao onBack={() => setView('home')}
+        onLancar={() => { setLedgerEdit(undefined); setView('lancar') }}
+        onEdit={(e: any) => { setLedgerEdit(e); setView('lancar') }}
+        onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('gestao'); setView('os') }} />}
+      {view === 'lancar' && <Lancar editEntry={ledgerEdit}
+        onBack={() => { const volta = ledgerEdit ? 'gestao' : 'home'; setLedgerEdit(undefined); setView(volta) }}
+        onEditDone={() => { setLedgerEdit(undefined); setView('gestao') }} />}
       {view === 'errorlogs' && <ErrorLogs onBack={() => setView('home')} />}
       {view === 'tasks' && <Tasks onBack={() => setView('home')} isOwner={isOwner} myId={user?.id || ''} />}
 
@@ -2564,7 +2576,7 @@ function Accompaniments({ typeId, typeName, say }: { typeId: string; typeName: s
             </div>
           )}
           {podePreco && (
-            <input type="number" inputMode="decimal" placeholder="preço ao cliente (MT) — opcional" value={novo.defaultPrice || ''} onChange={e => setNovo({ ...novo, defaultPrice: e.target.value })} style={{ marginTop: 8 }} />
+            <MoneyInput placeholder="preço ao cliente — opcional" value={novo.defaultPrice || ''} onChange={v => setNovo({ ...novo, defaultPrice: v })} style={{ marginTop: 8 }} />
           )}
           <div className="wf-nav" style={{ marginTop: 10 }}>
             <button className="btn-ghost btn-sm" onClick={() => setNovo(null)}>Cancelar</button>
@@ -3081,7 +3093,7 @@ function SupplierPrices({ supplierId, say }: { supplierId: string; say: (k: 'err
       {novo ? (
         <div className="supp-price-form">
           <input placeholder="trabalho (ex: Skim de discos)" value={novo.label} onChange={e => setNovo({ ...novo, label: e.target.value })} autoFocus />
-          <input type="number" inputMode="decimal" placeholder="preço MT" value={novo.price} onChange={e => setNovo({ ...novo, price: e.target.value })} />
+          <MoneyInput placeholder="preço" value={novo.price} onChange={v => setNovo({ ...novo, price: v })} />
           <div className="wf-nav" style={{ marginTop: 8 }}>
             <button className="btn-ghost btn-sm" onClick={() => setNovo(null)}>Cancelar</button>
             <button className="btn-primary btn-sm" disabled={busy || !novo.label.trim() || !novo.price} onClick={criar}>Guardar</button>
@@ -4429,7 +4441,7 @@ function PaymentPanel({ joId, say, isOwner, onChanged }: { joId: string; say: (k
           <div className="pay-row">
             <div style={{ flex: 1 }}>
               <label className="fl">Valor pago (MT)</label>
-              <input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" />
+              <MoneyInput value={amount} onChange={setAmount} />
             </div>
             <div style={{ flex: 1 }}>
               <label className="fl">Meio</label>
@@ -4506,6 +4518,8 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId, onDelete }: { sv
   useEffect(() => { if (podePreco) api('/api/v1/departments').then(r => setDepts(r.data || [])).catch(() => {}) }, [podePreco])
   const [precoEdit, setPrecoEdit] = useState<string>(svc.price != null ? String(svc.price) : '')
   const [deptEdit, setDeptEdit] = useState<string>(svc.department_id || '')
+  const [supCost, setSupCost] = useState<string>(svc.supplier_cost != null ? String(svc.supplier_cost) : '')
+  useEffect(() => { setSupCost(svc.supplier_cost != null ? String(svc.supplier_cost) : '') }, [svc.supplier_cost])
   useEffect(() => { setPrecoEdit(svc.price != null ? String(svc.price) : ''); setDeptEdit(svc.department_id || '') }, [svc.price, svc.department_id])
 
   const OUT_LBL: any = { none: '', sent: 'Enviado ao fornecedor', at_supplier: 'No fornecedor', returned: 'Voltou do fornecedor' }
@@ -4664,10 +4678,10 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId, onDelete }: { sv
                     </div>
                   )}
                   <label className="fl" style={{ marginTop: 10 }}>Custo do fornecedor (MT) <span className="opt-tag">só contas</span></label>
-                  <input type="number" inputMode="decimal" key={svc.supplier_cost ?? 'empty'} defaultValue={svc.supplier_cost ?? ''}
-                    placeholder="o que o fornecedor cobra"
-                    onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value === '' ? null : parseFloat((e.target as HTMLInputElement).value); gravarOut({ outsourced: true, cost: v }); (e.target as HTMLInputElement).blur() } }} />
-                  <p className="hint" style={{ marginTop: 3 }}>Escreve o valor e carrega Enter para guardar.</p>
+                  <MoneyInput placeholder="o que o fornecedor cobra" value={supCost} onChange={setSupCost} />
+                  {(supCost === '' ? null : Number(supCost)) !== (svc.supplier_cost != null ? Number(svc.supplier_cost) : null) && (
+                    <button className="btn-primary btn-sm" style={{ marginTop: 6 }} onClick={() => gravarOut({ outsourced: true, cost: supCost === '' ? null : parseFloat(supCost) })}>Guardar custo</button>
+                  )}
                 </>
               )}
             </>
@@ -4732,8 +4746,7 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId, onDelete }: { sv
           <div className="svc-pricing-row">
             <div style={{ flex: 1 }}>
               <label className="fl">Preço ao cliente (sem IVA)</label>
-              <input type="number" inputMode="decimal" value={precoEdit} placeholder="0 MT"
-                onChange={e => setPrecoEdit(e.target.value)} />
+              <MoneyInput value={precoEdit} onChange={setPrecoEdit} />
             </div>
             <div style={{ flex: 1 }}>
               <label className="fl">Departamento</label>
@@ -4743,7 +4756,7 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId, onDelete }: { sv
               </select>
             </div>
           </div>
-          {(precoEdit !== (svc.price != null ? String(svc.price) : '') || deptEdit !== (svc.department_id || '')) && (
+          {((precoEdit === '' ? null : Number(precoEdit)) !== (svc.price != null ? Number(svc.price) : null) || deptEdit !== (svc.department_id || '')) && (
             <div className="wf-nav" style={{ marginTop: 8 }}>
               <button className="btn-ghost btn-sm" onClick={() => { setPrecoEdit(svc.price != null ? String(svc.price) : ''); setDeptEdit(svc.department_id || '') }}>Repor</button>
               <button className="btn-primary btn-sm" onClick={() => gravarPreco({ price: precoEdit === '' ? null : parseFloat(precoEdit), departmentId: deptEdit || null })}>Guardar orçamento</button>
@@ -4819,7 +4832,7 @@ function ServiceCosts({ svcId, depts, ownerDeptId, podeGestao, say, onChanged }:
             {Object.keys(CAT).map(k => <option key={k} value={k}>{CAT[k]}</option>)}
           </select>
           <input placeholder="descrição (ex: Filtro de óleo, Mão de obra)" value={novo.label} onChange={e => setNovo({ ...novo, label: e.target.value })} autoFocus />
-          <input type="number" inputMode="decimal" placeholder="custo MT" value={novo.amount} onChange={e => setNovo({ ...novo, amount: e.target.value })} />
+          <MoneyInput placeholder="custo" value={novo.amount} onChange={v => setNovo({ ...novo, amount: v })} />
           {podeGestao && (
             <div className="svc-cost-internal">
               <label className="fl">Fornecido por outro departamento? <span className="opt-tag">cascata</span></label>
@@ -4980,6 +4993,74 @@ function LeadsList({ onBack, onStart }: { onBack: () => void; onStart: (lead: an
   )
 }
 
+// ── Campo de montante (MT) ───────────────────────────────────
+// Milhares separados enquanto se escreve (12.500), vírgula decimal,
+// máx. 2 casas, completa ",00" ao sair. Um ponto escrito no fim vira
+// vírgula (teclados de telemóvel). Aceita colar "12,500.50" ou
+// "12.500,50". Entrega ao pai sempre o valor canónico ("12500.5" ou "").
+function parseMoneyText(raw: string): { int: string; dec: string | null } {
+  const s = (raw || '').replace(/[^\d.,]/g, '')
+  const last = Math.max(s.lastIndexOf(','), s.lastIndexOf('.'))
+  let intPart = s, dec: string | null = null
+  if (last >= 0) {
+    const after = s.slice(last + 1)
+    if (after.length <= 2) { intPart = s.slice(0, last); dec = after }
+  }
+  intPart = intPart.replace(/[.,]/g, '').replace(/^0+(?=\d)/, '')
+  return { int: intPart, dec }
+}
+const groupThousands = (i: string) => i.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+function moneyDisplay(p: { int: string; dec: string | null }, pad: boolean): string {
+  if (!p.int && p.dec === null) return ''
+  const i = groupThousands(p.int || '0')
+  if (p.dec === null) return pad ? i + ',00' : i
+  return i + ',' + (pad ? p.dec.padEnd(2, '0') : p.dec)
+}
+function moneyCanonical(p: { int: string; dec: string | null }): string {
+  if (!p.int && !p.dec) return ''
+  const n = Number((p.int || '0') + (p.dec ? '.' + p.dec : ''))
+  return isFinite(n) ? String(n) : ''
+}
+function moneyFromValue(v: any): string {
+  if (v === '' || v == null || isNaN(Number(v))) return ''
+  const [i, d] = Number(v).toFixed(2).split('.')
+  return groupThousands(i) + ',' + d
+}
+// Formatar um valor para mostrar (listas, totais): 12.500,00 MT
+function fmtMT(v: any): string { return (moneyFromValue(v) || '0,00') + ' MT' }
+
+function MoneyInput({ value, onChange, placeholder, autoFocus, style }: {
+  value: any; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean; style?: any
+}) {
+  const [text, setText] = useState(() => moneyFromValue(value))
+  useEffect(() => {
+    const atual = moneyCanonical(parseMoneyText(text))
+    const vindo = value === '' || value == null || isNaN(Number(value)) ? '' : String(Number(value))
+    if (atual !== vindo) setText(moneyFromValue(value))
+  }, [value])
+  const mudar = (raw: string) => {
+    const antes = parseMoneyText(text)
+    if (antes.dec !== null && raw.length > text.length && raw.startsWith(text)) {
+      const novo = raw.slice(text.length)
+      if (/[.,]/.test(novo) || antes.dec.length >= 2) return   // já tem decimal / já tem 2 casas
+    }
+    const p = parseMoneyText(raw)
+    if (p.dec !== null && p.dec.length > 2) p.dec = p.dec.slice(0, 2)
+    setText(moneyDisplay(p, false))
+    onChange(moneyCanonical(p))
+  }
+  return (
+    <div className="money-input" style={style}>
+      <input type="text" inputMode="decimal" autoComplete="off" value={text}
+        placeholder={placeholder ?? '0,00'} autoFocus={autoFocus}
+        onChange={e => mudar(e.target.value)}
+        onFocus={() => { const p = parseMoneyText(text); if (p.dec === '00') setText(moneyDisplay({ int: p.int, dec: null }, false)) }}
+        onBlur={() => setText(moneyDisplay(parseMoneyText(text), true))} />
+      <span className="money-suffix">MT</span>
+    </div>
+  )
+}
+
 // ── LANÇAR — registar um movimento no dia-a-dia ──────────────
 // Despesa, receita ou movimento interno (não conta no resultado).
 // Categoria agrupada (plano configurável por oficina), departamento
@@ -4987,7 +5068,7 @@ function LeadsList({ onBack, onStart }: { onBack: () => void; onStart: (lead: an
 // trabalha em carros. É a Ponta A da conciliação.
 const LANC_METHODS: [string, string][] = [['bank', 'Banco'], ['cash', 'Caixa (dinheiro)'], ['mpesa', 'M-Pesa'], ['emola', 'e-Mola'], ['card', 'Cartão']]
 const LANC_METHOD_LABEL: Record<string, string> = Object.fromEntries(LANC_METHODS)
-function Lancar({ onBack }: { onBack: () => void }) {
+function Lancar({ onBack, editEntry, onEditDone }: { onBack: () => void; editEntry?: any; onEditDone?: () => void }) {
   const hoje = new Date().toISOString().slice(0, 10)
   const vazio = { entryDate: hoje, flow: 'cost', neutralDir: 'out', categoryId: '', departmentId: '', isTransversal: false,
     paymentMethod: 'bank', amount: '', description: '', counterparty: '', plate: '', make: '', model: '', engine: '' }
@@ -4999,6 +5080,28 @@ function Lancar({ onBack }: { onBack: () => void }) {
   const [recentes, setRecentes] = useState<any[]>([])
 
   const loadRecentes = () => api('/api/v1/ledger').then(r => setRecentes((r.entries || []).slice(0, 8))).catch(() => {})
+  const [editId, setEditId] = useState<string | null>(null)
+  const [editSource, setEditSource] = useState<string | null>(null)
+  const carregar = (r: any) => {
+    const entra = Number(r.revenue) > 0
+    setF({
+      entryDate: String(r.entry_date || hoje).slice(0, 10),
+      flow: r.flow || (entra ? 'revenue' : 'cost'), neutralDir: entra ? 'in' : 'out',
+      categoryId: r.category_id || '', departmentId: r.department_id || '', isTransversal: !!r.is_transversal,
+      paymentMethod: r.payment_method || 'bank', amount: String(Number(entra ? r.revenue : r.cost)),
+      description: r.description || '', counterparty: r.counterparty || '',
+      plate: r.plate || '', make: r.make || '', model: r.model || '', engine: r.engine || '',
+    })
+    setEditId(r.id); setEditSource(r.source || null); setMsg(null)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  useEffect(() => { if (editEntry) carregar(editEntry) }, [editEntry])
+  const cancelarEdicao = () => { setEditId(null); setEditSource(null); setF(vazio); if (editEntry) onEditDone?.() }
+  const apagar = async () => {
+    if (!editId || !confirm('Apagar este lançamento?')) return
+    try { await api(`/api/v1/ledger/${editId}`, { method: 'DELETE' }); setMsg({ kind: 'ok', text: 'Apagado.' }); setEditId(null); setF(vazio); loadRecentes(); if (editEntry) onEditDone?.() }
+    catch (e: any) { setMsg({ kind: 'err', text: e?.message || 'Não apagou.' }) }
+  }
   useEffect(() => {
     api('/api/v1/ledger/departments').then(r => setDepts(r.departments || [])).catch(() => {})
     api('/api/v1/ledger/categories').then(r => setCats(r.categories || [])).catch(() => {})
@@ -5026,7 +5129,7 @@ function Lancar({ onBack }: { onBack: () => void }) {
     const entra = f.flow === 'revenue' || (neutral && f.neutralDir === 'in')
     setBusy(true); setMsg(null)
     try {
-      await api('/api/v1/ledger', { method: 'POST', body: JSON.stringify({
+      await api(editId ? `/api/v1/ledger/${editId}` : '/api/v1/ledger', { method: editId ? 'PATCH' : 'POST', body: JSON.stringify({
         entryDate: f.entryDate, categoryId: f.categoryId,
         departmentId: neutral || f.isTransversal ? null : f.departmentId, isTransversal: !neutral && f.isTransversal,
         paymentMethod: f.paymentMethod || null,
@@ -5035,6 +5138,11 @@ function Lancar({ onBack }: { onBack: () => void }) {
         model: temCarro ? (f.model || null) : null, engine: temCarro ? (f.engine || null) : null,
         cost: entra ? 0 : val, revenue: entra ? val : 0,
       }) })
+      if (editId) {
+        setMsg({ kind: 'ok', text: 'Alterado.' }); setEditId(null); setEditSource(null); setF(vazio); loadRecentes()
+        if (editEntry) onEditDone?.()
+        return
+      }
       setMsg({ kind: 'ok', text: 'Lançado.' })
       // mantém sentido, data, departamento e meio — acelera lançar vários seguidos
       setF({ ...vazio, flow: f.flow, neutralDir: f.neutralDir, entryDate: f.entryDate, departmentId: f.departmentId,
@@ -5055,6 +5163,11 @@ function Lancar({ onBack }: { onBack: () => void }) {
 
       {msg && <div className={`banner ${msg.kind === 'ok' ? 'ok' : 'err'}`} style={{ marginBottom: 12 }}>{msg.text}</div>}
 
+      {editId && (
+        <div className="banner i" style={{ marginBottom: 12 }}>
+          <strong>A corrigir um lançamento.</strong>{editSource === 'os' ? ' Este veio do pagamento de um carro — se o pagamento for desmarcado ou refeito, é recriado automaticamente.' : ''}
+        </div>
+      )}
       <div className="card">
         <div className="lanc-flow">
           <button className={`lanc-flow-btn ${f.flow === 'cost' ? 'on cost' : ''}`} onClick={() => mudarSentido('cost')}>
@@ -5080,7 +5193,7 @@ function Lancar({ onBack }: { onBack: () => void }) {
         <div className="lanc-row2">
           <div>
             <label className="fl">Valor (MT)</label>
-            <input type="number" inputMode="decimal" value={f.amount} onChange={e => setF({ ...f, amount: e.target.value })} placeholder="0" autoFocus />
+            <MoneyInput value={f.amount} onChange={v => setF({ ...f, amount: v })} autoFocus />
           </div>
           <div>
             <label className="fl">Data</label>
@@ -5133,23 +5246,34 @@ function Lancar({ onBack }: { onBack: () => void }) {
         </select>
         {f.paymentMethod === 'cash' && <div className="lanc-nature">Caixa não aparece no extrato do banco — vai precisar da tua validação.</div>}
 
+        {!editId && f.flow === 'revenue' && deptSel?.tracks_vehicles && (
+          <div className="lanc-nature">Os pagamentos marcados no carro já entram sozinhos — não os lances outra vez aqui.</div>
+        )}
         <label className="fl" style={{ marginTop: 10 }}>Descrição</label>
         <input value={f.description} onChange={e => setF({ ...f, description: e.target.value })} placeholder="o que foi, em poucas palavras" />
 
         <label className="fl" style={{ marginTop: 10 }}>{f.flow === 'revenue' ? 'Cliente' : f.flow === 'cost' ? 'Fornecedor / a quem' : 'Origem / destino'} (opcional)</label>
         <input value={f.counterparty} onChange={e => setF({ ...f, counterparty: e.target.value })} />
 
-        <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 16 }} disabled={busy} onClick={lancar}>
-          {busy ? 'A lançar…' : 'Lançar'}
-        </button>
+        {editId ? (
+          <div className="lanc-edit-actions">
+            <button className="btn-primary" disabled={busy} onClick={lancar}>{busy ? 'A guardar…' : 'Guardar alterações'}</button>
+            <button className="btn-ghost" onClick={cancelarEdicao}>Cancelar</button>
+            <button className="btn-ghost lanc-del" onClick={apagar}><i className="ti ti-trash" aria-hidden="true"></i> Apagar</button>
+          </div>
+        ) : (
+          <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 16 }} disabled={busy} onClick={lancar}>
+            {busy ? 'A lançar…' : 'Lançar'}
+          </button>
+        )}
       </div>
 
       {recentes.length > 0 && (
         <>
-          <div className="det-section-title" style={{ marginTop: 18 }}>Últimos lançamentos</div>
+          <div className="det-section-title" style={{ marginTop: 18 }}>Últimos lançamentos <span className="opt-tag">toca para corrigir</span></div>
           <div className="lanc-recent">
             {recentes.map((r: any) => (
-              <div key={r.id} className={`lanc-recent-row ${r.counts_in_result === false ? 'neutral' : ''}`}>
+              <div key={r.id} className={`lanc-recent-row click ${r.counts_in_result === false ? 'neutral' : ''} ${editId === r.id ? 'editing' : ''}`} onClick={() => carregar(r)}>
                 <div>
                   <div className="lanc-recent-desc">{r.category_name || r.category || '—'}{r.plate ? ` · ${r.plate}` : ''}</div>
                   <div className="sub">
@@ -5161,11 +5285,238 @@ function Lancar({ onBack }: { onBack: () => void }) {
                   </div>
                 </div>
                 <div className={`lanc-recent-val ${r.counts_in_result === false ? 'neu' : sinal(r) === 'in' ? 'rev' : 'cost'}`}>
-                  {sinal(r) === 'in' ? '+' : '−'}{Number(Number(r.revenue) > 0 ? r.revenue : r.cost).toLocaleString('pt-PT')} MT
+                  {sinal(r) === 'in' ? '+' : '−'}{fmtMT(Number(r.revenue) > 0 ? r.revenue : r.cost)}
                 </div>
               </div>
             ))}
           </div>
+        </>
+      )}
+    </main>
+  )
+}
+
+// ── GESTÃO — o painel do dono ────────────────────────────────
+// O número do mês (positivo/negativo), por departamento, fixos vs
+// variáveis, onde vai o dinheiro, serviços com mais margem, o que está
+// por receber, evolução de 6 meses e os movimentos do mês (corrigir,
+// apagar, validar a caixa). Uma só fonte: os lançamentos (os pagamentos
+// dos carros entram sozinhos).
+const fmtSinal = (v: number) => (v < 0 ? '−' : v > 0 ? '+' : '') + fmtMT(Math.abs(v))
+const mesNome = (m: string) => { const [y, mm] = m.split('-').map(Number); const t = new Date(y, mm - 1, 1).toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' }); return t.charAt(0).toUpperCase() + t.slice(1) }
+const mesSomar = (m: string, n: number) => { const [y, mm] = m.split('-').map(Number); const d = new Date(Date.UTC(y, mm - 1 + n, 1)); return d.toISOString().slice(0, 7) }
+function Gestao({ onBack, onLancar, onEdit, onOpenOS }: { onBack: () => void; onLancar: () => void; onEdit: (e: any) => void; onOpenOS: (id: string) => void }) {
+  const [mes, setMes] = useState(new Date().toISOString().slice(0, 7))
+  const [s, setS] = useState<any>(null)
+  const [movs, setMovs] = useState<any[]>([])
+  const [erro, setErro] = useState<string | null>(null)
+  const [aDividir, setADividir] = useState<Record<string, string> | null>(null)
+  const [verTodos, setVerTodos] = useState(false)
+
+  const carregar = async () => {
+    setErro(null)
+    try {
+      const r = await api(`/api/v1/ledger/summary?month=${mes}`); setS(r)
+      const to = mesSomar(mes, 1) + '-01'
+      const [y, mm] = to.split('-').map(Number); const ultimo = new Date(Date.UTC(y, mm - 1, 0)).toISOString().slice(0, 10)
+      const l = await api(`/api/v1/ledger?from=${mes}-01&to=${ultimo}`); setMovs(l.entries || [])
+    } catch (e: any) { setErro(e?.message || 'Não foi possível carregar o painel.') }
+  }
+  useEffect(() => { setS(null); carregar() }, [mes])
+
+  const validar = async (r: any) => {
+    try { await api(`/api/v1/ledger/${r.id}`, { method: 'PATCH', body: JSON.stringify({ validated: !r.validated }) }); carregar() } catch {}
+  }
+  const guardarDivisao = async () => {
+    if (!s || !aDividir) return
+    const shares = s.departamentos.map((d: any) => ({ departmentId: d.id, share: aDividir[d.id] === '' || aDividir[d.id] == null ? null : Number(String(aDividir[d.id]).replace(',', '.')) }))
+    try { await api('/api/v1/ledger/overhead-shares', { method: 'PUT', body: JSON.stringify({ shares }) }); setADividir(null); carregar() }
+    catch (e: any) { alert(e?.message || 'Não guardou.') }
+  }
+
+  const maxMes = s ? Math.max(1, ...s.meses.map((m: any) => Math.abs(m.resultado))) : 1
+  const maxGrupo = s?.grupos?.length ? s.grupos[0].valor : 1
+  const totalCusto = s ? s.fixos + s.variaveis + s.semNatureza : 0
+  const somaDivisao = aDividir ? Object.values(aDividir).reduce((a, v) => a + (Number(String(v).replace(',', '.')) || 0), 0) : 0
+  const movsVisiveis = verTodos ? movs : movs.slice(0, 12)
+
+  return (
+    <main className="reception gestao">
+      <div className="rec-top" style={{ marginBottom: 12 }}>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
+        <h2 style={{ margin: 0, fontSize: 20 }}>Gestão</h2>
+        <button className="btn-primary btn-sm" onClick={onLancar}><i className="ti ti-plus" aria-hidden="true"></i> Lançar</button>
+      </div>
+
+      <div className="g-mes">
+        <button className="btn-ghost btn-sm" onClick={() => setMes(mesSomar(mes, -1))} aria-label="Mês anterior"><i className="ti ti-chevron-left" aria-hidden="true"></i></button>
+        <span>{mesNome(mes)}</span>
+        <button className="btn-ghost btn-sm" onClick={() => setMes(mesSomar(mes, 1))} aria-label="Mês seguinte"><i className="ti ti-chevron-right" aria-hidden="true"></i></button>
+      </div>
+
+      {erro && <div className="banner err" style={{ marginBottom: 12 }}>{erro}</div>}
+      {!s ? <p className="empty">A carregar…</p> : (
+        <>
+          <div className={`g-hero ${s.resultado < 0 ? 'neg' : s.resultado > 0 ? 'pos' : ''}`}>
+            <div className="g-hero-lbl">Resultado do mês</div>
+            <div className="g-hero-val">{fmtSinal(s.resultado)}</div>
+            <div className="g-hero-sub"><span>Receitas {fmtMT(s.receitas)}</span><span>Despesas {fmtMT(s.despesas)}</span></div>
+          </div>
+
+          {(s.caixaPorValidar.n > 0 || (s.transversais !== 0 && !s.divisaoDefinida) || s.totalPorReceber > 0) && (
+            <div className="g-alertas">
+              {s.caixaPorValidar.n > 0 && <div className="g-alerta warn"><i className="ti ti-alert-triangle" aria-hidden="true"></i> {s.caixaPorValidar.n} {s.caixaPorValidar.n === 1 ? 'movimento' : 'movimentos'} em caixa por validar ({fmtMT(s.caixaPorValidar.valor)})</div>}
+              {s.transversais !== 0 && !s.divisaoDefinida && <div className="g-alerta warn"><i className="ti ti-alert-triangle" aria-hidden="true"></i> Custos transversais ainda não divididos pelos departamentos</div>}
+              {s.totalPorReceber > 0 && <div className="g-alerta info"><i className="ti ti-clock-dollar" aria-hidden="true"></i> {fmtMT(s.totalPorReceber)} por receber de carros prontos ou entregues</div>}
+            </div>
+          )}
+
+          <div className="det-section-title">Por departamento</div>
+          <div className="g-depts">
+            {s.departamentos.map((d: any) => (
+              <div key={d.id} className="g-dept">
+                <div className="g-dept-top"><span className="g-dept-nome">{d.name}</span><span className={`g-val ${d.resultado < 0 ? 'neg' : d.resultado > 0 ? 'pos' : ''}`}>{fmtSinal(d.resultado)}</span></div>
+                <div className="g-dept-linhas">
+                  <span>Receitas {fmtMT(d.receitas)}</span>
+                  <span>Despesas {fmtMT(d.despesas)}</span>
+                  {s.divisaoDefinida && d.transversal !== 0 && <span>Transversais ({String(d.share).replace('.', ',')}%) {fmtMT(d.transversal)}</span>}
+                </div>
+              </div>
+            ))}
+            {s.transversais !== 0 && !s.divisaoDefinida && (
+              <div className="g-dept transv">
+                <div className="g-dept-top"><span className="g-dept-nome">Transversais (por dividir)</span><span className="g-val neg">{fmtSinal(-s.transversais)}</span></div>
+              </div>
+            )}
+          </div>
+          {!aDividir ? (
+            <button className="accomp-add" onClick={() => setADividir(Object.fromEntries(s.departamentos.map((d: any) => [d.id, d.share == null ? '' : String(d.share)])))}>
+              <i className="ti ti-chart-pie" aria-hidden="true"></i> {s.divisaoDefinida ? 'Alterar a divisão dos transversais' : 'Definir a divisão dos transversais'}
+            </button>
+          ) : (
+            <div className="card g-divisao">
+              <div className="lanc-nature" style={{ marginTop: 0, marginBottom: 8 }}>Que parte dos custos transversais (contabilista, etc.) cabe a cada departamento? Tem de somar 100%.</div>
+              {s.departamentos.map((d: any) => (
+                <div key={d.id} className="g-div-linha">
+                  <span>{d.name}</span>
+                  <input inputMode="decimal" value={aDividir[d.id] ?? ''} onChange={e => setADividir({ ...aDividir, [d.id]: e.target.value.replace(/[^\d.,]/g, '') })} placeholder="0" />
+                  <span>%</span>
+                </div>
+              ))}
+              <div className={`g-div-soma ${Math.abs(somaDivisao - 100) < 0.01 ? 'ok' : ''}`}>Total: {somaDivisao.toLocaleString('pt-PT')}%</div>
+              <div className="wf-nav" style={{ marginTop: 8 }}>
+                <button className="btn-ghost btn-sm" onClick={() => setADividir(null)}>Cancelar</button>
+                <button className="btn-primary btn-sm" onClick={guardarDivisao}>Guardar divisão</button>
+              </div>
+            </div>
+          )}
+
+          {totalCusto > 0 && (
+            <>
+              <div className="det-section-title" style={{ marginTop: 18 }}>Para onde vai o dinheiro</div>
+              <div className="card">
+                <div className="g-fv-bar">
+                  {s.fixos > 0 && <div className="fx" style={{ width: `${s.fixos / totalCusto * 100}%` }} />}
+                  {s.variaveis > 0 && <div className="vr" style={{ width: `${s.variaveis / totalCusto * 100}%` }} />}
+                  {s.semNatureza > 0 && <div className="sn" style={{ width: `${s.semNatureza / totalCusto * 100}%` }} />}
+                </div>
+                <div className="g-fv-leg">
+                  <span><i className="dot fx" />Fixos {fmtMT(s.fixos)}</span>
+                  <span><i className="dot vr" />Variáveis {fmtMT(s.variaveis)}</span>
+                  {s.semNatureza > 0 && <span><i className="dot sn" />Sem categoria {fmtMT(s.semNatureza)}</span>}
+                </div>
+                <div className="g-grupos">
+                  {s.grupos.map((g: any) => (
+                    <div key={g.nome} className="g-grupo">
+                      <div className="g-grupo-top"><span>{g.nome}</span><span>{fmtMT(g.valor)}</span></div>
+                      <div className="g-grupo-bar"><div style={{ width: `${g.valor / maxGrupo * 100}%` }} /></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {s.topServicos.length > 0 && (
+            <>
+              <div className="det-section-title" style={{ marginTop: 18 }}>Serviços com mais margem <span className="opt-tag">carros pagos no mês</span></div>
+              <div className="lanc-recent">
+                {s.topServicos.map((x: any) => (
+                  <div key={x.nome} className="lanc-recent-row">
+                    <div>
+                      <div className="lanc-recent-desc">{x.nome}{x.n > 1 ? ` ×${x.n}` : ''}</div>
+                      <div className="sub">Receita {fmtMT(x.receita)} · custo {fmtMT(x.custo)}</div>
+                    </div>
+                    <div className={`lanc-recent-val ${x.margem < 0 ? 'cost' : 'rev'}`}>{fmtSinal(x.margem)}</div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {s.porReceber.length > 0 && (
+            <>
+              <div className="det-section-title" style={{ marginTop: 18 }}>Por receber</div>
+              <div className="lanc-recent">
+                {s.porReceber.map((c: any) => (
+                  <div key={c.id} className="lanc-recent-row click" onClick={() => onOpenOS(c.id)}>
+                    <div>
+                      <div className="lanc-recent-desc">{c.number}{c.plate ? ` · ${c.plate}` : ''}</div>
+                      <div className="sub">{[c.brand, c.model].filter(Boolean).join(' ')}{c.status ? ` · ${STATUS_LABEL[c.status] || c.status}` : ''}</div>
+                    </div>
+                    <div className="lanc-recent-val">{fmtMT(c.total)}</div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          <div className="g-mini">
+            <div className="g-mini-card"><i className="ti ti-car" aria-hidden="true"></i><div><strong>{s.naOficina}</strong><span>carros na oficina</span></div></div>
+            {s.internos > 0 && <div className="g-mini-card"><i className="ti ti-receipt" aria-hidden="true"></i><div><strong>{fmtMT(s.internos)}</strong><span>movimentos internos (fora do resultado)</span></div></div>}
+          </div>
+
+          <div className="det-section-title" style={{ marginTop: 18 }}>Últimos 6 meses</div>
+          <div className="card g-meses">
+            {s.meses.map((m: any) => (
+              <div key={m.month} className="g-mes-col" onClick={() => setMes(m.month)} title={fmtSinal(m.resultado)}>
+                <div className="g-mes-area">
+                  <div className={`g-mes-barra ${m.resultado < 0 ? 'neg' : 'pos'} ${m.month === mes ? 'atual' : ''}`}
+                    style={{ height: `${Math.max(m.temDados ? 4 : 0, Math.abs(m.resultado) / maxMes * 100)}%` }} />
+                </div>
+                <span>{new Date(Number(m.month.slice(0, 4)), Number(m.month.slice(5)) - 1, 1).toLocaleDateString('pt-PT', { month: 'short' }).replace('.', '')}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="det-section-title" style={{ marginTop: 18 }}>Movimentos do mês <span className="opt-tag">{movs.length}</span></div>
+          {movs.length === 0 ? <p className="hint">Sem movimentos neste mês.</p> : (
+            <div className="lanc-recent">
+              {movsVisiveis.map((r: any) => {
+                const entra = Number(r.revenue) > 0
+                const porValidar = r.payment_method === 'cash' && !r.validated
+                return (
+                  <div key={r.id} className={`lanc-recent-row ${r.counts_in_result === false ? 'neutral' : ''}`}>
+                    <div className="g-mov-main click" onClick={() => onEdit(r)}>
+                      <div className="lanc-recent-desc">{r.category_name || r.category || '—'}{r.plate ? ` · ${r.plate}` : ''}{r.source === 'os' && <span className="g-tag">do carro</span>}</div>
+                      <div className="sub">{[r.description, r.department || (r.is_transversal ? 'Transversal' : null),
+                        r.payment_method ? LANC_METHOD_LABEL[r.payment_method] : null,
+                        r.entry_date ? new Date(r.entry_date).toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' }) : null].filter(Boolean).join(' · ')}</div>
+                    </div>
+                    <div className="g-mov-dir">
+                      <div className={`lanc-recent-val ${r.counts_in_result === false ? 'neu' : entra ? 'rev' : 'cost'}`}>{entra ? '+' : '−'}{fmtMT(entra ? r.revenue : r.cost)}</div>
+                      {r.payment_method === 'cash' && (
+                        <button className={`g-tic ${porValidar ? '' : 'on'}`} onClick={() => validar(r)}>
+                          <i className={`ti ${porValidar ? 'ti-circle' : 'ti-circle-check'}`} aria-hidden="true"></i> {porValidar ? 'validar' : 'validado'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {movs.length > 12 && <button className="accomp-add" onClick={() => setVerTodos(!verTodos)}>{verTodos ? 'Mostrar menos' : `Ver todos (${movs.length})`}</button>}
         </>
       )}
     </main>
