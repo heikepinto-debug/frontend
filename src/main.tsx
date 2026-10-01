@@ -112,6 +112,8 @@ function Shell() {
   const [ppiReturnTo, setPpiReturnTo] = useState<'list' | 'ppi-list'>('list')
   const [osReturnTo, setOsReturnTo] = useState<'list' | 'authorizations' | 'detail' | 'qcqueue' | 'gestao'>('list')
   const [ledgerEdit, setLedgerEdit] = useState<any>(undefined)   // lançamento aberto a partir do painel
+  const [ledgerCar, setLedgerCar] = useState<any>(undefined)     // carro pré-escolhido (vindo da OS)
+  const [ledgerBack, setLedgerBack] = useState<'home' | 'gestao' | 'os'>('home')
   const [signId, setSignId] = useState<string | undefined>(undefined)
   const [completeId, setCompleteId] = useState<string | undefined>(undefined)
   const [bookingCount, setBookingCount] = useState(0)
@@ -241,7 +243,7 @@ function Shell() {
             </button>
           )}
           {isOwner && (
-            <button className={`nav-item ${view === 'lancar' ? 'active' : ''}`} onClick={() => go('lancar')}>
+            <button className={`nav-item ${view === 'lancar' ? 'active' : ''}`} onClick={() => { setLedgerEdit(undefined); setLedgerCar(undefined); setLedgerBack('home'); go('lancar') }}>
               <i className="ti ti-cash-banknote" aria-hidden="true"></i><span className="nav-label">Lançar</span>
             </button>
           )}
@@ -369,7 +371,9 @@ function Shell() {
         onOpenOther={(id: string) => setDetailId(id)}
         onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('detail'); setView('os') }} />}
       {view === 'bookings' && <Bookings onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} />}
-      {view === 'os' && osId && <OrderService joId={osId} onBack={() => setView(osReturnTo)} myId={user?.id || ''} isOwner={isOwner} onOpenEntry={(id: string) => { setDetailId(id); setView('detail') }} />}
+      {view === 'os' && osId && <OrderService joId={osId} onBack={() => setView(osReturnTo)} myId={user?.id || ''} isOwner={isOwner}
+        onLancarGasto={(car: any) => { setLedgerEdit(undefined); setLedgerCar(car); setLedgerBack('os'); setView('lancar') }}
+        onEditGasto={(e: any) => { setLedgerEdit(e); setLedgerCar(undefined); setLedgerBack('os'); setView('lancar') }} onOpenEntry={(id: string) => { setDetailId(id); setView('detail') }} />}
       {view === 'authorizations' && <Authorizations onBack={() => setView('home')} onOpen={(id: string) => { setOsId(id); setOsReturnTo('authorizations'); setView('os') }} />}
       {view === 'sign' && signId && <CompleteSignature joId={signId} onBack={() => setView('list')} onDone={() => { setSignId(undefined); setView('list') }} />}
       {view === 'complete' && completeId && <CompleteEntry joId={completeId} onBack={() => setView('list')} onDone={() => { setCompleteId(undefined); setView('list') }} />}
@@ -377,12 +381,12 @@ function Shell() {
       {view === 'servicetypes' && <ServiceTypes onBack={() => setView('home')} />}
       {view === 'password' && <ChangePassword onBack={() => setView('home')} />}
       {view === 'gestao' && <Gestao onBack={() => setView('home')}
-        onLancar={() => { setLedgerEdit(undefined); setView('lancar') }}
-        onEdit={(e: any) => { setLedgerEdit(e); setView('lancar') }}
+        onLancar={() => { setLedgerEdit(undefined); setLedgerCar(undefined); setLedgerBack('gestao'); setView('lancar') }}
+        onEdit={(e: any) => { setLedgerEdit(e); setLedgerCar(undefined); setLedgerBack('gestao'); setView('lancar') }}
         onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('gestao'); setView('os') }} />}
-      {view === 'lancar' && <Lancar editEntry={ledgerEdit}
-        onBack={() => { const volta = ledgerEdit ? 'gestao' : 'home'; setLedgerEdit(undefined); setView(volta) }}
-        onEditDone={() => { setLedgerEdit(undefined); setView('gestao') }} />}
+      {view === 'lancar' && <Lancar editEntry={ledgerEdit} carro={ledgerCar} backLabel={ledgerBack === 'os' ? 'Carro' : ledgerBack === 'gestao' ? 'Gestão' : 'Início'}
+        onBack={() => { setLedgerEdit(undefined); setLedgerCar(undefined); setView(ledgerBack) }}
+        onEditDone={() => { setLedgerEdit(undefined); setLedgerCar(undefined); setView(ledgerBack) }} />}
       {view === 'errorlogs' && <ErrorLogs onBack={() => setView('home')} />}
       {view === 'tasks' && <Tasks onBack={() => setView('home')} isOwner={isOwner} myId={user?.id || ''} />}
 
@@ -4518,8 +4522,6 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId, onDelete }: { sv
   useEffect(() => { if (podePreco) api('/api/v1/departments').then(r => setDepts(r.data || [])).catch(() => {}) }, [podePreco])
   const [precoEdit, setPrecoEdit] = useState<string>(svc.price != null ? String(svc.price) : '')
   const [deptEdit, setDeptEdit] = useState<string>(svc.department_id || '')
-  const [supCost, setSupCost] = useState<string>(svc.supplier_cost != null ? String(svc.supplier_cost) : '')
-  useEffect(() => { setSupCost(svc.supplier_cost != null ? String(svc.supplier_cost) : '') }, [svc.supplier_cost])
   useEffect(() => { setPrecoEdit(svc.price != null ? String(svc.price) : ''); setDeptEdit(svc.department_id || '') }, [svc.price, svc.department_id])
 
   const OUT_LBL: any = { none: '', sent: 'Enviado ao fornecedor', at_supplier: 'No fornecedor', returned: 'Voltou do fornecedor' }
@@ -4677,11 +4679,7 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId, onDelete }: { sv
                       </div>
                     </div>
                   )}
-                  <label className="fl" style={{ marginTop: 10 }}>Custo do fornecedor (MT) <span className="opt-tag">só contas</span></label>
-                  <MoneyInput placeholder="o que o fornecedor cobra" value={supCost} onChange={setSupCost} />
-                  {(supCost === '' ? null : Number(supCost)) !== (svc.supplier_cost != null ? Number(svc.supplier_cost) : null) && (
-                    <button className="btn-primary btn-sm" style={{ marginTop: 6 }} onClick={() => gravarOut({ outsourced: true, cost: supCost === '' ? null : parseFloat(supCost) })}>Guardar custo</button>
-                  )}
+                  {podePreco && <p className="hint" style={{ marginTop: 8 }}>O que o fornecedor cobra lança-se em "Gastos deste carro" (categoria Serviços externos).</p>}
                 </>
               )}
             </>
@@ -4764,9 +4762,8 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId, onDelete }: { sv
           )}
         </div>
       )}
-      {podeCusto && (
-        <ServiceCosts svcId={svc.id} depts={depts} ownerDeptId={svc.department_id} podeGestao={podePreco} say={say} onChanged={onChanged} />
-      )}
+      {/* v103: os custos já não se registam no serviço — gastos de um carro vão pelo Lançar
+          ("Gastos deste carro"). ServiceCosts fica adormecido (reversível). */}
     </div>
   )
 }
@@ -5068,10 +5065,15 @@ function MoneyInput({ value, onChange, placeholder, autoFocus, style }: {
 // trabalha em carros. É a Ponta A da conciliação.
 const LANC_METHODS: [string, string][] = [['bank', 'Banco'], ['cash', 'Caixa (dinheiro)'], ['mpesa', 'M-Pesa'], ['emola', 'e-Mola'], ['card', 'Cartão']]
 const LANC_METHOD_LABEL: Record<string, string> = Object.fromEntries(LANC_METHODS)
-function Lancar({ onBack, editEntry, onEditDone }: { onBack: () => void; editEntry?: any; onEditDone?: () => void }) {
+function Lancar({ onBack, editEntry, onEditDone, carro, backLabel }: { onBack: () => void; editEntry?: any; onEditDone?: () => void; carro?: any; backLabel?: string }) {
   const hoje = new Date().toISOString().slice(0, 10)
   const vazio = { entryDate: hoje, flow: 'cost', neutralDir: 'out', categoryId: '', departmentId: '', isTransversal: false,
-    paymentMethod: 'bank', amount: '', description: '', counterparty: '', plate: '', make: '', model: '', engine: '' }
+    paymentMethod: 'bank', amount: '', description: '', counterparty: '', plate: '', make: '', model: '', engine: '',
+    jobOrderId: '', carLabel: '' }
+  const rotuloCarro = (c: any) => [c.number, c.plate, [c.brand, c.model].filter(Boolean).join(' ')].filter(Boolean).join(' · ')
+  const [manual, setManual] = useState(false)
+  const [carQ, setCarQ] = useState('')
+  const [cars, setCars] = useState<any[]>([])
   const [f, setF] = useState<any>(vazio)
   const [depts, setDepts] = useState<any[]>([])
   const [cats, setCats] = useState<any[]>([])
@@ -5091,7 +5093,9 @@ function Lancar({ onBack, editEntry, onEditDone }: { onBack: () => void; editEnt
       paymentMethod: r.payment_method || 'bank', amount: String(Number(entra ? r.revenue : r.cost)),
       description: r.description || '', counterparty: r.counterparty || '',
       plate: r.plate || '', make: r.make || '', model: r.model || '', engine: r.engine || '',
+      jobOrderId: r.job_order_id || '', carLabel: r.job_order_id ? rotuloCarro({ plate: r.plate, brand: r.make, model: r.model }) : '',
     })
+    setManual(!r.job_order_id && !!(r.plate || r.make || r.model))
     setEditId(r.id); setEditSource(r.source || null); setMsg(null)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -5118,6 +5122,21 @@ function Lancar({ onBack, editEntry, onEditDone }: { onBack: () => void; editEnt
   const deptSel = depts.find((d: any) => d.id === f.departmentId)
   const neutral = f.flow === 'neutral'
   const temCarro = !neutral && !f.isTransversal && deptSel?.tracks_vehicles
+  useEffect(() => {
+    if (!carro) return
+    setF((p: any) => ({ ...p, flow: 'cost', jobOrderId: carro.id, carLabel: rotuloCarro(carro), plate: carro.plate || '', make: carro.brand || '', model: carro.model || '' }))
+  }, [carro])
+  // vindo de um carro: pré-escolhe o 1.º departamento que trabalha em carros
+  useEffect(() => {
+    if (carro && !f.departmentId && !f.isTransversal && depts.length) {
+      const d = depts.find((x: any) => x.tracks_vehicles); if (d) setF((p: any) => ({ ...p, departmentId: d.id }))
+    }
+  }, [carro, depts])
+  useEffect(() => {
+    if (!temCarro || f.jobOrderId || manual) return
+    const t = setTimeout(() => { api(`/api/v1/ledger/cars?q=${encodeURIComponent(carQ)}`).then(r => setCars(r.cars || [])).catch(() => {}) }, 250)
+    return () => clearTimeout(t)
+  }, [carQ, temCarro, f.jobOrderId, manual])
 
   const mudarSentido = (flow: string) => setF({ ...f, flow, categoryId: '' })
 
@@ -5134,6 +5153,7 @@ function Lancar({ onBack, editEntry, onEditDone }: { onBack: () => void; editEnt
         departmentId: neutral || f.isTransversal ? null : f.departmentId, isTransversal: !neutral && f.isTransversal,
         paymentMethod: f.paymentMethod || null,
         description: f.description || null, counterparty: f.counterparty || null,
+        jobOrderId: temCarro && f.jobOrderId ? f.jobOrderId : null,
         plate: temCarro ? (f.plate || null) : null, make: temCarro ? (f.make || null) : null,
         model: temCarro ? (f.model || null) : null, engine: temCarro ? (f.engine || null) : null,
         cost: entra ? 0 : val, revenue: entra ? val : 0,
@@ -5146,7 +5166,8 @@ function Lancar({ onBack, editEntry, onEditDone }: { onBack: () => void; editEnt
       setMsg({ kind: 'ok', text: 'Lançado.' })
       // mantém sentido, data, departamento e meio — acelera lançar vários seguidos
       setF({ ...vazio, flow: f.flow, neutralDir: f.neutralDir, entryDate: f.entryDate, departmentId: f.departmentId,
-        isTransversal: f.isTransversal, paymentMethod: f.paymentMethod })
+        isTransversal: f.isTransversal, paymentMethod: f.paymentMethod,
+        ...(carro ? { jobOrderId: f.jobOrderId, carLabel: f.carLabel, plate: f.plate, make: f.make, model: f.model } : {}) })
       loadRecentes()
     } catch (e: any) { setMsg({ kind: 'err', text: e?.message || 'Não guardou.' }) }
     finally { setBusy(false) }
@@ -5157,7 +5178,7 @@ function Lancar({ onBack, editEntry, onEditDone }: { onBack: () => void; editEnt
   return (
     <main className="reception">
       <div className="rec-top" style={{ marginBottom: 16 }}>
-        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> {backLabel || 'Início'}</button>
         <h2 style={{ margin: 0, fontSize: 20 }}>Lançar</h2><span />
       </div>
 
@@ -5228,15 +5249,39 @@ function Lancar({ onBack, editEntry, onEditDone }: { onBack: () => void; editEnt
 
         {temCarro && (
           <div className="lanc-carro">
-            <div className="lanc-carro-title"><i className="ti ti-car" aria-hidden="true"></i> Carro (opcional)</div>
-            <div className="lanc-row2">
-              <div><label className="fl">Matrícula</label><input value={f.plate} onChange={e => setF({ ...f, plate: e.target.value })} placeholder="ABC-123-MC" /></div>
-              <div><label className="fl">Motor</label><input value={f.engine} onChange={e => setF({ ...f, engine: e.target.value })} placeholder="2.0 Turbo" /></div>
-            </div>
-            <div className="lanc-row2" style={{ marginTop: 8 }}>
-              <div><label className="fl">Marca</label><input value={f.make} onChange={e => setF({ ...f, make: e.target.value })} placeholder="BMW" /></div>
-              <div><label className="fl">Modelo</label><input value={f.model} onChange={e => setF({ ...f, model: e.target.value })} placeholder="120i" /></div>
-            </div>
+            <div className="lanc-carro-title"><i className="ti ti-car" aria-hidden="true"></i> Carro {f.jobOrderId ? '' : '(opcional)'}</div>
+            {f.jobOrderId ? (
+              <div className="lanc-car-sel">
+                <span>{f.carLabel || 'Carro escolhido'}</span>
+                <button className="btn-ghost btn-sm" onClick={() => setF({ ...f, jobOrderId: '', carLabel: '', plate: '', make: '', model: '' })}>trocar</button>
+              </div>
+            ) : manual ? (
+              <>
+                <div className="lanc-row2">
+                  <div><label className="fl">Matrícula</label><input value={f.plate} onChange={e => setF({ ...f, plate: e.target.value })} placeholder="ABC-123-MC" /></div>
+                  <div><label className="fl">Motor</label><input value={f.engine} onChange={e => setF({ ...f, engine: e.target.value })} placeholder="2.0 Turbo" /></div>
+                </div>
+                <div className="lanc-row2" style={{ marginTop: 8 }}>
+                  <div><label className="fl">Marca</label><input value={f.make} onChange={e => setF({ ...f, make: e.target.value })} placeholder="BMW" /></div>
+                  <div><label className="fl">Modelo</label><input value={f.model} onChange={e => setF({ ...f, model: e.target.value })} placeholder="120i" /></div>
+                </div>
+                <button className="lanc-link" onClick={() => { setManual(false); setF({ ...f, plate: '', make: '', model: '', engine: '' }) }}>Escolher um carro da oficina</button>
+              </>
+            ) : (
+              <>
+                <input value={carQ} onChange={e => setCarQ(e.target.value)} placeholder="procurar matrícula, nº ou cliente" />
+                <div className="lanc-car-list">
+                  {cars.length === 0 && <div className="lanc-nature">Nenhum carro encontrado.</div>}
+                  {cars.map((c: any) => (
+                    <button key={c.id} onClick={() => setF({ ...f, jobOrderId: c.id, carLabel: rotuloCarro(c), plate: c.plate || '', make: c.brand || '', model: c.model || '' })}>
+                      <strong>{c.plate || c.number}</strong>
+                      <span>{[c.number, [c.brand, c.model].filter(Boolean).join(' '), c.customer].filter(Boolean).join(' · ')}{c.status === 'delivered' ? ' · entregue' : ''}</span>
+                    </button>
+                  ))}
+                </div>
+                <button className="lanc-link" onClick={() => setManual(true)}>Carro que não está no sistema</button>
+              </>
+            )}
           </div>
         )}
 
@@ -5437,17 +5482,17 @@ function Gestao({ onBack, onLancar, onEdit, onOpenOS }: { onBack: () => void; on
             </>
           )}
 
-          {s.topServicos.length > 0 && (
+          {s.topCarros.length > 0 && (
             <>
-              <div className="det-section-title" style={{ marginTop: 18 }}>Serviços com mais margem <span className="opt-tag">carros pagos no mês</span></div>
+              <div className="det-section-title" style={{ marginTop: 18 }}>Carros com mais margem <span className="opt-tag">pagos no mês</span></div>
               <div className="lanc-recent">
-                {s.topServicos.map((x: any) => (
-                  <div key={x.nome} className="lanc-recent-row">
+                {s.topCarros.map((c: any) => (
+                  <div key={c.id} className="lanc-recent-row click" onClick={() => onOpenOS(c.id)}>
                     <div>
-                      <div className="lanc-recent-desc">{x.nome}{x.n > 1 ? ` ×${x.n}` : ''}</div>
-                      <div className="sub">Receita {fmtMT(x.receita)} · custo {fmtMT(x.custo)}</div>
+                      <div className="lanc-recent-desc">{c.number}{c.plate ? ` · ${c.plate}` : ''}</div>
+                      <div className="sub">Cobrado {fmtMT(c.cobrado)} · gasto {fmtMT(c.gasto)}{c.gasto === 0 ? ' (sem gastos lançados)' : ''}</div>
                     </div>
-                    <div className={`lanc-recent-val ${x.margem < 0 ? 'cost' : 'rev'}`}>{fmtSinal(x.margem)}</div>
+                    <div className={`lanc-recent-val ${c.margem < 0 ? 'cost' : 'rev'}`}>{fmtSinal(c.margem)}</div>
                   </div>
                 ))}
               </div>
@@ -5520,6 +5565,44 @@ function Gestao({ onBack, onLancar, onEdit, onOpenOS }: { onBack: () => void; on
         </>
       )}
     </main>
+  )
+}
+
+// ── GASTOS DESTE CARRO (na OS, só o dono) ────────────────────
+// O que lançaste para este carro, o que já recebeste, e quanto fica
+// face ao valor a cobrar. É o ÚNICO sítio onde estão os gastos do carro.
+function GastosCarro({ joId, onLancar, onEdit }: { joId: string; onLancar: () => void; onEdit: (e: any) => void }) {
+  const [d, setD] = useState<any>(null)
+  useEffect(() => { api(`/api/v1/ledger/car/${joId}`).then(setD).catch(() => setD({ entries: [], gasto: 0, recebido: 0, preco: 0 })) }, [joId])
+  if (!d) return null
+  const gastos = d.entries.filter((e: any) => Number(e.cost) > 0)
+  const fica = d.preco - d.gasto
+  return (
+    <div className="gastos-box">
+      <div className="budget-title"><i className="ti ti-receipt" aria-hidden="true"></i> Gastos deste carro <span className="opt-tag">só tu</span></div>
+      <div className="gastos-resumo">
+        <div><span>A cobrar</span><strong>{d.preco > 0 ? fmtMT(d.preco) : '—'}</strong></div>
+        <div><span>Gastaste</span><strong className="cost">{fmtMT(d.gasto)}</strong></div>
+        <div><span>Fica</span><strong className={d.preco > 0 ? (fica < 0 ? 'cost' : 'rev') : ''}>{d.preco > 0 ? fmtSinal(fica) : '—'}</strong></div>
+      </div>
+      {d.recebido > 0 && <div className="lanc-nature" style={{ marginTop: 6 }}>Já recebido deste carro: {fmtMT(d.recebido)}</div>}
+      {gastos.length === 0
+        ? <p className="hint" style={{ margin: '10px 0 0' }}>Ainda não lançaste gastos para este carro.</p>
+        : (
+          <div className="lanc-recent" style={{ marginTop: 10 }}>
+            {gastos.map((e: any) => (
+              <div key={e.id} className="lanc-recent-row click" onClick={() => onEdit(e)}>
+                <div>
+                  <div className="lanc-recent-desc">{e.category_name || '—'}</div>
+                  <div className="sub">{[e.description, e.counterparty, e.entry_date ? new Date(e.entry_date).toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' }) : null].filter(Boolean).join(' · ')}</div>
+                </div>
+                <div className="lanc-recent-val cost">−{fmtMT(e.cost)}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      <button className="accomp-add" style={{ marginTop: 10 }} onClick={onLancar}><i className="ti ti-plus" aria-hidden="true"></i> Lançar gasto neste carro</button>
+    </div>
   )
 }
 
@@ -5673,7 +5756,7 @@ function WorkflowGuide({ status }: { status: string }) {
   )
 }
 
-function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: string; onBack: () => void; myId: string; isOwner: boolean; onOpenEntry?: (id: string) => void }) {
+function OrderService({ joId, onBack, myId, isOwner, onOpenEntry, onLancarGasto, onEditGasto }: { joId: string; onBack: () => void; myId: string; isOwner: boolean; onOpenEntry?: (id: string) => void; onLancarGasto?: (car: any) => void; onEditGasto?: (e: any) => void }) {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState(false)
@@ -5683,7 +5766,7 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
   const [rejecting, setRejecting] = useState(false)
   const [rejectNote, setRejectNote] = useState('')
   const [photoView, setPhotoView] = useState<string | null>(null)
-  const [budget, setBudget] = useState<any>(null)
+  const [gastosKey, setGastosKey] = useState(0)   // refresca "Gastos deste carro" quando os preços mudam
   const podePreco = useSession(s => s.can)('pricing:manage')
 
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -5696,8 +5779,7 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
     }).catch((e: any) => setLoadError(e?.message || 'Erro de ligação')).finally(() => setLoading(false))
   }
   useEffect(() => { load() }, [joId])
-  const loadBudget = () => { if (podePreco) api(`/api/v1/os/${joId}/budget`).then(setBudget).catch(() => {}) }
-  useEffect(() => { loadBudget() }, [joId, podePreco])
+  const loadBudget = () => setGastosKey(k => k + 1)
 
   const startOS = async () => {
     setStarting(true)
@@ -5983,34 +6065,9 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry }: { joId: stri
       <PartsToBuy services={data?.services || []} />
 
 
-      {podePreco && budget && (budget.precoCliente > 0 || (budget.porDepartamento || []).length > 0) && (
-        <div className="budget-box">
-          <div className="budget-title"><i className="ti ti-report-money" aria-hidden="true"></i> Margem por departamento</div>
-          <div className="budget-head-row">
-            <span className="bh-dept"></span>
-            <span className="bh-col">Receita</span>
-            <span className="bh-col">Custo</span>
-            <span className="bh-col">Margem</span>
-          </div>
-          {(budget.porDepartamento || []).map((d: any) => (
-            <div key={d.id} className="budget-drow">
-              <span className="bd-dept">{d.name}</span>
-              <span className="bd-col">{Number(d.receita).toLocaleString('pt-PT')}</span>
-              <span className="bd-col cost">{Number(d.custo).toLocaleString('pt-PT')}</span>
-              <span className={`bd-col margin ${d.margem < 0 ? 'neg' : ''}`}>{Number(d.margem).toLocaleString('pt-PT')}</span>
-            </div>
-          ))}
-          <div className="budget-drow tot">
-            <span className="bd-dept">Total</span>
-            <span className="bd-col"></span>
-            <span className="bd-col"></span>
-            <span className={`bd-col margin ${budget.margemTotal < 0 ? 'neg' : ''}`}>{Number(budget.margemTotal || 0).toLocaleString('pt-PT')}</span>
-          </div>
-          <div className="budget-client">
-            <span>O cliente paga (sem IVA)</span>
-            <span className="budget-client-val">{Number(budget.precoCliente || 0).toLocaleString('pt-PT')} MT</span>
-          </div>
-        </div>
+      {podePreco && onLancarGasto && (
+        <GastosCarro key={gastosKey} joId={joId} onLancar={() => onLancarGasto({ id: jo.id, number: jo.number, plate: jo.plate, brand: jo.brand, model: jo.model })}
+          onEdit={(e: any) => onEditGasto?.(e)} />
       )}
 
       <div className="diag-lists-intro">

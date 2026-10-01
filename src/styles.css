@@ -1351,3 +1351,18 @@ textarea { resize: vertical; line-height: 1.55; }
 .lanc-edit-actions { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin-top: 16px; }
 .lanc-edit-actions .btn-primary { justify-content: center; }
 .lanc-del { color: #B91C1C; }
+
+/* ── Gastos deste carro (OS) + escolher carro no Lançar ── */
+.gastos-box { border: 1px solid var(--line-2); border-radius: var(--radius); padding: 14px; margin-top: 14px; background: var(--s1); }
+.gastos-resumo { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+.gastos-resumo > div { background: var(--s2); border-radius: var(--radius-sm); padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.gastos-resumo span { font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .03em; font-weight: 700; }
+.gastos-resumo strong { font-size: 14px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.gastos-resumo strong.cost { color: #B91C1C; } .gastos-resumo strong.rev { color: #15803D; }
+.lanc-car-sel { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--s1); border: 1px solid var(--line-2); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 14px; font-weight: 600; color: var(--ink); }
+.lanc-car-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; max-height: 220px; overflow-y: auto; }
+.lanc-car-list button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--s1); cursor: pointer; }
+.lanc-car-list button:hover { border-color: var(--brand); }
+.lanc-car-list strong { font-size: 14px; color: var(--ink); }
+.lanc-car-list span { font-size: 12px; color: var(--ink-3); }
+.lanc-link { background: none; border: none; color: var(--brand); font-size: 12.5px; font-weight: 600; padding: 6px 0 0; cursor: pointer; }
