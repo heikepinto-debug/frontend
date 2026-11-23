@@ -4517,6 +4517,7 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId, onDelete }: { sv
   const [showWorkers, setShowWorkers] = useState(false)
   const podeFinance = useSession(s => s.can)('finance:read')
   const podePreco = useSession(s => s.can)('pricing:manage')
+  const podeGerir = useSession(s => s.can)('os:manage')
   const podeCusto = useSession(s => s.can)('cost:register')
   const [depts, setDepts] = useState<any[]>([])
   useEffect(() => { if (podePreco) api('/api/v1/departments').then(r => setDepts(r.data || [])).catch(() => {}) }, [podePreco])
@@ -4636,9 +4637,9 @@ function ServiceRow({ svc, onChanged, say, team, responsibleId, onDelete }: { sv
         </div>
       )}
 
-      <button className="svc-out-toggle" onClick={abrirOut}>
+      {podeGerir && <button className="svc-out-toggle" onClick={abrirOut}>
         <i className="ti ti-building-store" aria-hidden="true"></i> {svc.outsourced ? 'Gerir terceirização' : 'Terceirizar este serviço'}
-      </button>
+      </button>}
       {outOpen && (
         <div className="svc-out-panel">
           <button className={`chk ${svc.outsourced ? 'on' : ''}`} style={{ width: '100%', justifyContent: 'flex-start' }}
@@ -5767,6 +5768,8 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry, onLancarGasto,
   const [rejectNote, setRejectNote] = useState('')
   const [photoView, setPhotoView] = useState<string | null>(null)
   const [gastosKey, setGastosKey] = useState(0)   // refresca "Gastos deste carro" quando os preços mudam
+  const canDo = useSession(s => s.can)
+  const podeGerirOS = canDo('os:manage'), podeQC = canDo('qc:approve'), podePagar = canDo('payment:register')
   const podePreco = useSession(s => s.can)('pricing:manage')
 
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -5999,7 +6002,7 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry, onLancarGasto,
         </div>
       )}
 
-      {todosProntos && !jaMarcadoPronto && (
+      {todosProntos && !jaMarcadoPronto && podeQC && (
         <div className="os-ready-hint">
           <div><i className="ti ti-circle-check" aria-hidden="true"></i> Todos os serviços estão concluídos. O carro pode estar pronto para entrega.</div>
           <button className="btn-primary btn-sm" onClick={async () => {
@@ -6012,7 +6015,7 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry, onLancarGasto,
       <div className="os-responsible">
         <i className="ti ti-user-star" aria-hidden="true"></i>
         <span className="os-resp-label">Responsável:</span>
-        <select value={jo.responsible_id || ''} onChange={async e => {
+        <select value={jo.responsible_id || ''} disabled={!podeGerirOS} onChange={async e => {
           try { await api(`/api/v1/os/${jo.id}/responsible`, { method: 'POST', body: JSON.stringify({ userId: e.target.value || null }) }); load() }
           catch { say('err', 'Não foi possível definir o responsável.') }
         }}>
@@ -6021,7 +6024,7 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry, onLancarGasto,
         </select>
       </div>
 
-      {!['ready', 'quality_check', 'delivered', 'cancelled', 'draft', 'reception'].includes(jo.status) && (
+      {podeQC && !['ready', 'quality_check', 'delivered', 'cancelled', 'draft', 'reception'].includes(jo.status) && (
         <div className="start-qc-box">
           <div className="start-qc-txt">
             <i className="ti ti-shield-check" aria-hidden="true"></i>
@@ -6040,11 +6043,12 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry, onLancarGasto,
         </div>
       )}
 
-      {['ready', 'quality_check'].includes(jo.status) && (
-        <QCPanel joId={jo.id} say={say} onDelivered={load} />
+      {['ready', 'quality_check'].includes(jo.status) && (podeQC
+        ? <QCPanel joId={jo.id} say={say} onDelivered={load} />
+        : <div className="banner i" style={{ marginTop: 14 }}>Este carro está no controlo de qualidade, a cargo da gestão.</div>
       )}
 
-      {['ready', 'quality_check', 'delivered'].includes(jo.status) && (
+      {podePagar && ['ready', 'quality_check', 'delivered'].includes(jo.status) && (
         <PaymentPanel joId={jo.id} say={say} isOwner={isOwner} onChanged={load} />
       )}
 
@@ -6056,10 +6060,10 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry, onLancarGasto,
       <div className="svc-list">
         {(data?.services || []).length === 0 && <p className="hint">Ainda não há serviços. Acrescenta o que é preciso fazer (ex.: DPF delete, revisão, remap).</p>}
         {(data?.services || []).map((s: any) => (
-          <ServiceRow key={s.id} svc={s} onChanged={() => { load(); loadBudget() }} say={say} team={data?.team || []} responsibleId={jo.responsible_id} onDelete={async () => { try { await api(`/api/v1/os/services/${s.id}`, { method: 'DELETE' }); load(); loadBudget() } catch (e: any) { say('err', e?.message || 'Não removeu.') } }} />
+          <ServiceRow key={s.id} svc={s} onChanged={() => { load(); loadBudget() }} say={say} team={data?.team || []} responsibleId={jo.responsible_id} onDelete={!podeGerirOS ? undefined : async () => { try { await api(`/api/v1/os/services/${s.id}`, { method: 'DELETE' }); load(); loadBudget() } catch (e: any) { say('err', e?.message || 'Não removeu.') } }} />
         ))}
       </div>
-      <AddService joId={joId} serviceTypes={data?.serviceTypes || []} onAdded={() => { load(); loadBudget() }} say={say} />
+      {podeGerirOS && <AddService joId={joId} serviceTypes={data?.serviceTypes || []} onAdded={() => { load(); loadBudget() }} say={say} />}
 
       <div className="det-section-title diag-list-title" style={{ marginTop: 18 }}><span className="diag-num">3</span> Peças a comprar</div>
       <PartsToBuy services={data?.services || []} />
@@ -6103,7 +6107,7 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry, onLancarGasto,
                 <div><i className="ti ti-ban" aria-hidden="true"></i> Dispensado: {p.dismiss_reason}</div>
                 <button className="prob-undo" onClick={() => reopenProblem(p.id)}>Reabrir</button>
               </div>
-            ) : (
+            ) : !podeGerirOS ? null : (
               <div className="prob-decide">
                 <button className="btn-primary btn-sm" onClick={() => toService(p)}>
                   <i className="ti ti-tool" aria-hidden="true"></i> Transformar em serviço
