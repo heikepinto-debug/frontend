@@ -8,6 +8,9 @@ import { createRoot } from 'react-dom/client'
 import { useSession } from './session'
 import { api, offline, uploadPhoto, startAutoSync, API, API_EM_FALTA } from './api'
 import { registerSW } from 'virtual:pwa-register'
+import '@fontsource-variable/inter'
+import '@fontsource-variable/space-grotesk'
+import '@tabler/icons-webfont/dist/tabler-icons-outline.min.css'
 import './styles.css'
 
 // ── Actualização da aplicação ────────────────────────────────
@@ -94,6 +97,110 @@ function Login() {
   )
 }
 
+type ListFilter = 'all' | 'draft' | 'diagnosis' | 'quote' | 'working' | 'qc' | 'ready' | 'delivered'
+
+// ── HOJE — o ecrã de entrada ─────────────────────────────────
+// Responde a «o que está à minha espera?». Os blocos vêm do servidor
+// já filtrados pelas permissões de quem está a ver.
+const NEED_TXT: Record<string, { um: string; varios: string; tom: string; sub?: string }> = {
+  price:     { um: 'Orçamento por dar preço', varios: 'Orçamentos por dar preço', tom: 'amber' },
+  authorize: { um: 'Diagnóstico por autorizar', varios: 'Diagnósticos por autorizar', tom: 'amber' },
+  qc:        { um: 'Carro para controlo de qualidade', varios: 'Carros para controlo de qualidade', tom: 'violet' },
+  collect:   { um: 'Carro pronto por cobrar', varios: 'Carros prontos por cobrar', tom: 'blue' },
+  ledger:    { um: 'Lançamento por validar', varios: 'Lançamentos por validar', tom: 'grey', sub: 'Lançados pela equipa' },
+  bookings:  { um: 'Marcação para hoje', varios: 'Marcações para hoje', tom: 'grey', sub: 'De hoje ou em atraso' },
+  drafts:    { um: 'Entrada por acabar', varios: 'Entradas por acabar', tom: 'grey', sub: 'Ficaram a meio' },
+  mine:      { um: 'Carro com trabalho teu', varios: 'Carros com trabalho teu', tom: 'green' },
+}
+const nomeCarro = (c: any) => [c.brand, c.model].filter(Boolean).join(' ') || c.plate || 'Carro'
+function Hoje({ data, nome, oficina, onOpenCar, onList, onGo }: { data: any; nome: string; oficina: string; onOpenCar: (id: string) => void; onList: (f: string) => void; onGo: (v: string) => void }) {
+  const h = new Date().getHours()
+  const saud = h < 12 ? 'Bom dia' : h < 19 ? 'Boa tarde' : 'Boa noite'
+  const needs: any[] = data?.needs || []
+  const total = needs.reduce((a, n) => a + n.count, 0)
+  const abrir = (n: any) => {
+    const um = n.count === 1 && n.cars?.[0]?.id
+    if (n.key === 'price') return um ? onOpenCar(um) : onList('quote')
+    if (n.key === 'authorize') return onGo('authorizations')
+    if (n.key === 'qc') return um ? onOpenCar(um) : onList('qc')
+    if (n.key === 'collect') return um ? onOpenCar(um) : onList('ready')
+    if (n.key === 'ledger') return onGo('lancar')
+    if (n.key === 'bookings') return onGo('bookings')
+    if (n.key === 'drafts') return onList('draft')
+    if (n.key === 'mine') return um ? onOpenCar(um) : onList('working')
+  }
+  const sub = (n: any) => {
+    const t = NEED_TXT[n.key]
+    const nomes = (n.cars || []).map(nomeCarro).join(' · ')
+    const mais = n.count > (n.cars || []).length && (n.cars || []).length ? ` e mais ${n.count - n.cars.length}` : ''
+    const valor = n.key === 'collect' && n.total ? fmtMT(n.total) : ''
+    return [nomes + mais, valor].filter(Boolean).join(' · ') || t?.sub || ''
+  }
+  const FASES: [string, string][] = [['diagnosis', 'Diagnóstico'], ['quote', 'Orçamento'], ['working', 'Em trabalho'], ['qc', 'No QC'], ['ready', 'Prontos']]
+  return (
+    <main className="hoje">
+      <header className="hoje-head">
+        <div className="hoje-oficina">{oficina}</div>
+        <h1>{saud}{nome ? `, ${nome}` : ''}</h1>
+        <p>{!data ? 'A carregar…'
+          : `${data.inShop} ${data.inShop === 1 ? 'carro' : 'carros'} na oficina · ${total === 0 ? 'nada à tua espera' : total === 1 ? '1 coisa à tua espera' : `${total} coisas à tua espera`}`}</p>
+      </header>
+
+      <div className="hoje-body">
+        <section>
+          <h2 className="sec-title">Precisa de ti</h2>
+          {data && needs.length === 0 && (
+            <div className="hoje-vazio"><i className="ti ti-check" aria-hidden="true"></i> Nada à tua espera neste momento.</div>
+          )}
+          {needs.length > 0 && (
+            <div className="need-list">
+              {needs.map(n => (
+                <button key={n.key} className="need-row" onClick={() => abrir(n)}>
+                  <span className={`need-num t-${NEED_TXT[n.key]?.tom || 'grey'}`}>{n.count}</span>
+                  <span className="need-txt">
+                    <strong>{n.count === 1 ? NEED_TXT[n.key]?.um : NEED_TXT[n.key]?.varios}</strong>
+                    {sub(n) && <span>{sub(n)}</span>}
+                  </span>
+                  <i className="ti ti-chevron-right" aria-hidden="true"></i>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section>
+          <h2 className="sec-title">Na oficina agora</h2>
+          <div className="fase-grid">
+            {FASES.map(([k, l]) => (
+              <button key={k} className={`fase-tile ${k === 'ready' ? 'destaque' : ''}`} onClick={() => onList(k)}>
+                <span className="fase-num">{data ? data.pipeline?.[k] ?? 0 : '–'}</span>
+                <span className="fase-lbl">{l}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {(data?.stalled || []).length > 0 && (
+          <section>
+            <h2 className="sec-title">Parados há mais tempo</h2>
+            <div className="need-list">
+              {data.stalled.map((c: any) => (
+                <button key={c.id} className="need-row" onClick={() => onOpenCar(c.id)}>
+                  <span className="need-txt">
+                    <strong>{nomeCarro(c)} · {c.plate}</strong>
+                    <span>{STATUS_LABEL[c.status] || c.status}</span>
+                  </span>
+                  <span className="stalled-days">{c.days} dias</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    </main>
+  )
+}
+
 function Shell() {
   const { tenant, user, logout } = useSession()
   const canDo = useSession(s => s.can)
@@ -105,12 +212,12 @@ function Shell() {
   const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates' | 'ppi-model' | 'suppliers' | 'qcqueue' | 'admin' | 'quickbooking' | 'leads' | 'lancar' | 'gestao'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [leadPrefill, setLeadPrefill] = useState<any>(undefined)   // dados da marcação rápida + modo
-  const [listFilter, setListFilter] = useState<'all' | 'diagnosis' | 'working' | 'ready' | 'delivered'>('all')
+  const [listFilter, setListFilter] = useState<ListFilter>('all')
   const [detailId, setDetailId] = useState<string | undefined>(undefined)
   const [osId, setOsId] = useState<string | undefined>(undefined)
   const [ppiJoId, setPpiJoId] = useState<string | null>(null)
   const [ppiReturnTo, setPpiReturnTo] = useState<'list' | 'ppi-list'>('list')
-  const [osReturnTo, setOsReturnTo] = useState<'list' | 'authorizations' | 'detail' | 'qcqueue' | 'gestao'>('list')
+  const [osReturnTo, setOsReturnTo] = useState<'list' | 'authorizations' | 'detail' | 'qcqueue' | 'gestao' | 'home'>('list')
   const [ledgerEdit, setLedgerEdit] = useState<any>(undefined)   // lançamento aberto a partir do painel
   const [ledgerCar, setLedgerCar] = useState<any>(undefined)     // carro pré-escolhido (vindo da OS)
   const [ledgerBack, setLedgerBack] = useState<'home' | 'gestao' | 'os'>('home')
@@ -137,6 +244,7 @@ function Shell() {
   }, [])
 
   const [summary, setSummary] = useState<any>(null)
+  const [today, setToday] = useState<any>(null)
   const [navOpen, setNavOpen] = useState(false)  // menu no telemóvel
 
   // Ecrãs onde recarregar destrói trabalho não enviado (fotos e assinatura
@@ -170,29 +278,50 @@ function Shell() {
       api('/api/v1/os/awaiting-authorization').then(r => setAuthCount((r.data || []).length)).catch(() => {})
       api('/api/v1/os/awaiting-qc').then(r => setQcCount((r.data || []).length)).catch(() => {})
       api('/api/v1/dashboard/summary').then(setSummary).catch(() => {})
+      api('/api/v1/today').then(setToday).catch(() => {})
     }
   }, [view])
 
+  const canLedger = canDo('pricing:manage') || canDo('ledger:own')
+  const pendLedger = (today?.needs || []).find((n: any) => n.key === 'ledger')?.count || 0
   const nav = (v: string, label: string, icon: string, count?: number, badge = false) => ({
     v, label, icon, count, badge,
   })
-  const navItems = [
-    nav('home', 'Painel', 'ti-layout-dashboard'),
-    canDo('reception:create') && nav('reception', 'Nova recepção', 'ti-plus'),
-    canDo('reception:read') && nav('list', 'Recepções', 'ti-list-details', summary?.inShop),
-    canDo('reception:read') && nav('ppi-list', 'Inspeções PPI', 'ti-clipboard-list'),
-    authCount > 0 && nav('authorizations', 'Autorizações', 'ti-clipboard-check', authCount, true),
-    qcCount > 0 && nav('qcqueue', 'Controlo de qualidade', 'ti-shield', qcCount, true),
-    canDo('reception:create') && nav('bookings', 'Marcações', 'ti-calendar-event', bookingCount || undefined, bookingCount > 0),
-    nav('tasks', 'Tarefas', 'ti-checklist'),
-    canDo('config:manage') && nav('servicetypes', 'Tipos de serviço', 'ti-tool'),
-    user?.platformAdmin && nav('admin', 'Oficinas (admin)', 'ti-building-store'),
-    canDo('config:manage') && nav('ppi-model', 'Modelo de inspeção', 'ti-adjustments'),
-    canDo('config:manage') && nav('suppliers', 'Fornecedores', 'ti-building-store'),
-    nav('updates', 'Novidades', 'ti-bell'),
-  ].filter(Boolean) as any[]
+  // Menu por grupos: o que se usa todos os dias em cima, o resto arrumado.
+  const navGroups = [
+    { title: 'Dia-a-dia', items: [
+      nav('home', 'Hoje', 'ti-home'),
+      canDo('reception:read') && nav('list', 'Carros', 'ti-car', summary?.inShop),
+      authCount > 0 && nav('authorizations', 'Autorizações', 'ti-clipboard-check', authCount, true),
+      qcCount > 0 && canDo('qc:approve') && nav('qcqueue', 'Controlo de qualidade', 'ti-shield-check', qcCount, true),
+      canDo('reception:create') && nav('bookings', 'Marcações', 'ti-calendar-event', bookingCount || undefined, bookingCount > 0),
+      nav('tasks', 'Tarefas', 'ti-checklist'),
+      canDo('reception:read') && nav('ppi-list', 'Inspeções PPI', 'ti-clipboard-list'),
+    ] },
+    { title: 'Dinheiro', items: [
+      canLedger && nav('lancar', 'Lançamentos', 'ti-receipt', pendLedger || undefined, true),
+      canDo('config:manage') && nav('servicetypes', 'Serviços e preços', 'ti-tool'),
+    ] },
+    { title: 'A oficina', items: [
+      canDo('config:manage') && nav('suppliers', 'Fornecedores', 'ti-building-store'),
+      canDo('config:manage') && nav('ppi-model', 'Modelo de inspeção', 'ti-adjustments'),
+      user?.platformAdmin && nav('admin', 'Oficinas (admin)', 'ti-building-skyscraper'),
+      isOwner && nav('errorlogs', 'Registo de erros', 'ti-bug'),
+      nav('updates', 'Novidades', 'ti-bell'),
+      nav('password', 'A minha senha', 'ti-key'),
+    ] },
+  ].map(g => ({ ...g, items: g.items.filter(Boolean) as any[] })).filter(g => g.items.length > 0)
 
-  const go = (v: string) => { setView(v as any); setNavOpen(false) }
+  const go = (v: string) => {
+    if (v === 'lancar') { setLedgerEdit(undefined); setLedgerCar(undefined); setLedgerBack('home') }
+    setView(v as any); setNavOpen(false)
+  }
+  const novaEntrada = () => { setResumeDraftId(undefined); setLeadPrefill(undefined); setView('reception'); setNavOpen(false) }
+  // Ecrãs "de topo": têm a barra de baixo no telemóvel. Os outros (carro,
+  // entrada, assinatura…) são tarefas — têm o seu próprio "voltar".
+  const TOPO = ['home', 'list', 'tasks', 'lancar', 'bookings', 'ppi-list', 'authorizations', 'qcqueue', 'updates',
+    'suppliers', 'servicetypes', 'ppi-model', 'admin', 'errorlogs', 'password']
+  const eTopo = TOPO.includes(view)
 
   return (
     <div className="app-shell">
@@ -223,130 +352,53 @@ function Shell() {
         </div>
 
         <nav className="sidebar-nav">
-          {navItems.map(it => (
-            <button key={it.v} className={`nav-item ${view === it.v ? 'active' : ''}`} onClick={() => go(it.v)}>
-              <i className={`ti ${it.icon}`} aria-hidden="true"></i>
-              <span className="nav-label">{it.label}</span>
-              {it.count != null && it.count > 0 && <span className={`nav-count ${it.badge ? 'badge' : ''}`}>{it.count}</span>}
+          {canDo('reception:create') && (
+            <button className="sidebar-new" onClick={novaEntrada}>
+              <i className="ti ti-plus" aria-hidden="true"></i> Nova entrada
             </button>
+          )}
+          {navGroups.map(g => (
+            <div key={g.title} className="nav-group">
+              <div className="nav-group-title">{g.title}</div>
+              {g.items.map((it: any) => (
+                <button key={it.v} className={`nav-item ${view === it.v ? 'active' : ''}`} onClick={() => go(it.v)}>
+                  <i className={`ti ${it.icon}`} aria-hidden="true"></i>
+                  <span className="nav-label">{it.label}</span>
+                  {it.count != null && it.count > 0 && <span className={`nav-count ${it.badge ? 'badge' : ''}`}>{it.count}</span>}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
 
         <div className="sidebar-foot">
           <div className="sidebar-ver" title="Versão desta aplicação"><strong>{__APP_PACKAGE__}</strong> · {__APP_VERSION__}</div>
-          <button className={`nav-item ${view === 'password' ? 'active' : ''}`} onClick={() => go('password')}>
-            <i className="ti ti-key" aria-hidden="true"></i><span className="nav-label">A minha senha</span>
-          </button>
-          {isOwner && (
-            <button className={`nav-item ${view === 'gestao' ? 'active' : ''}`} onClick={() => go('gestao')}>
-              <i className="ti ti-report-analytics" aria-hidden="true"></i><span className="nav-label">Gestão</span>
-            </button>
-          )}
-          {isOwner && (
-            <button className={`nav-item ${view === 'lancar' ? 'active' : ''}`} onClick={() => { setLedgerEdit(undefined); setLedgerCar(undefined); setLedgerBack('home'); go('lancar') }}>
-              <i className="ti ti-cash-banknote" aria-hidden="true"></i><span className="nav-label">Lançar</span>
-            </button>
-          )}
-          {isOwner && (
-            <button className={`nav-item ${view === 'errorlogs' ? 'active' : ''}`} onClick={() => go('errorlogs')}>
-              <i className="ti ti-bug" aria-hidden="true"></i><span className="nav-label">Diagnóstico</span>
-            </button>
-          )}
           <div className="sidebar-user">
             <div className="sidebar-user-info">
               <div className="sidebar-user-name">{user?.name}</div>
               {!online && <span className="offline-pill">Offline{pending > 0 ? ` · ${pending}` : ''}</span>}
               {online && pending > 0 && <button className="sync-pill" onClick={() => setView('queue')} title="Ver o que está por sincronizar">A sincronizar {pending}…</button>}
             </div>
-            <button className="btn-ghost btn-sm" onClick={logout} title="Sair"><i className="ti ti-logout" aria-hidden="true"></i></button>
+            <button className="btn-ghost btn-sm" onClick={logout} title="Sair" aria-label="Sair"><i className="ti ti-logout" aria-hidden="true"></i></button>
           </div>
         </div>
       </aside>
 
       {/* Área de conteúdo */}
-      <div className="content-area">
-        <header className="mobile-topbar">
-          <button className="btn-ghost btn-sm" onClick={() => setNavOpen(true)}><i className="ti ti-menu-2" aria-hidden="true"></i></button>
-          <div className="tenant-name">{tenant?.name}</div>
-          <span style={{ width: 32 }} />
-        </header>
+      <div className={`content-area ${eTopo ? 'has-bottom-bar' : ''}`}>
+        {!eTopo && view !== 'os' && (
+          <header className="mobile-topbar">
+            <button className="btn-ghost btn-sm" onClick={() => setNavOpen(true)} aria-label="Abrir menu"><i className="ti ti-menu-2" aria-hidden="true"></i></button>
+            <div className="tenant-name">{tenant?.name}</div>
+            <span style={{ width: 32 }} />
+          </header>
+        )}
 
       {view === 'home' && (
-        <main className="dash home-bg">
-          <div className="dash-head">
-            <div>
-              <h1>Olá, {user?.name?.split(' ')[0]}</h1>
-              <p className="dash-date">{new Date().toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-            </div>
-          </div>
-
-          {/* Painel de relance */}
-          <div className="stat-grid">
-            <button className="stat-card accent" onClick={() => { setListFilter('all'); setView('list') }}>
-              <div className="stat-num">{summary?.inShop ?? '–'}</div>
-              <div className="stat-label">Carros na oficina</div>
-            </button>
-            <button className="stat-card" onClick={() => { setListFilter('diagnosis'); setView('list') }}>
-              <div className="stat-num">{summary?.diagnosing ?? '–'}</div>
-              <div className="stat-label">Em diagnóstico</div>
-            </button>
-            <button className="stat-card" onClick={() => { setListFilter('working'); setView('list') }}>
-              <div className="stat-num">{summary?.working ?? '–'}</div>
-              <div className="stat-label">Em trabalho</div>
-            </button>
-            <button className="stat-card ok" onClick={() => { setListFilter('ready'); setView('list') }}>
-              <div className="stat-num">{summary?.ready ?? '–'}</div>
-              <div className="stat-label">Prontos a levantar</div>
-            </button>
-            {canDo('reception:create') && (
-              <button className="stat-card" onClick={() => setView('bookings')}>
-                <div className="stat-num">{summary?.bookingsToday ?? '–'}</div>
-                <div className="stat-label">Marcações hoje</div>
-              </button>
-            )}
-            {authCount > 0 && (
-              <button className="stat-card warn" onClick={() => setView('authorizations')}>
-                <div className="stat-num">{summary?.pendingAuth ?? authCount}</div>
-                <div className="stat-label">Autorizações pendentes</div>
-              </button>
-            )}
-          </div>
-
-          {/* Acções rápidas */}
-          <div className="dash-section-title">Acções</div>
-          <div className="quick-actions">
-            {canDo('reception:create') && (
-              <button className="quick-card" onClick={() => { setResumeDraftId(undefined); setView('reception') }}>
-                <i className="ti ti-plus" aria-hidden="true"></i>
-                <span>Nova recepção</span>
-              </button>
-            )}
-            {canDo('reception:read') && (
-              <button className="quick-card" onClick={() => setView('list')}>
-                <i className="ti ti-list-details" aria-hidden="true"></i>
-                <span>Ver carros</span>
-              </button>
-            )}
-            {authCount > 0 && (
-              <button className="quick-card" onClick={() => setView('authorizations')}>
-                <i className="ti ti-clipboard-check" aria-hidden="true"></i>
-                <span>Autorizar diagnósticos</span>
-                <span className="quick-badge">{authCount}</span>
-              </button>
-            )}
-            {canDo('reception:create') && (
-              <button className="quick-card" onClick={() => setView('bookings')}>
-                <i className="ti ti-calendar-event" aria-hidden="true"></i>
-                <span>Marcações</span>
-                {bookingCount > 0 && <span className="quick-badge">{bookingCount}</span>}
-              </button>
-            )}
-            <button className="quick-card" onClick={() => setView('tasks')}>
-              <i className="ti ti-checklist" aria-hidden="true"></i>
-              <span>Tarefas</span>
-            </button>
-          </div>
-        </main>
+        <Hoje data={today} nome={user?.name?.split(' ')[0] || ''} oficina={tenant?.name || ''}
+          onOpenCar={(id: string) => { setOsId(id); setOsReturnTo('home'); setView('os') }}
+          onList={(f: any) => { setListFilter(f); setView('list') }}
+          onGo={go} />
       )}
       {view === 'reception' && <Reception key={resumeDraftId || (leadPrefill?.id ? 'lead-' + leadPrefill.id : 'new')} resumeDraftId={resumeDraftId} leadPrefill={leadPrefill} onDone={() => { setResumeDraftId(undefined); setLeadPrefill(undefined); setView('list') }} onBack={() => { setResumeDraftId(undefined); setLeadPrefill(undefined); setView('home') }} onStartPPI={(joId: string) => { setResumeDraftId(undefined); setLeadPrefill(undefined); setPpiJoId(joId); setPpiReturnTo('list'); setView('ppi') }} />}
       {view === 'ppi' && ppiJoId && <PPICircuit joId={ppiJoId} onBack={() => setView(ppiReturnTo)} />}
@@ -384,17 +436,25 @@ function Shell() {
         onLancar={() => { setLedgerEdit(undefined); setLedgerCar(undefined); setLedgerBack('gestao'); setView('lancar') }}
         onEdit={(e: any) => { setLedgerEdit(e); setLedgerCar(undefined); setLedgerBack('gestao'); setView('lancar') }}
         onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('gestao'); setView('os') }} />}
-      {view === 'lancar' && <Lancar editEntry={ledgerEdit} carro={ledgerCar} backLabel={ledgerBack === 'os' ? 'Carro' : ledgerBack === 'gestao' ? 'Gestão' : 'Início'}
+      {view === 'lancar' && <Lancar editEntry={ledgerEdit} carro={ledgerCar} backLabel={ledgerBack === 'os' ? 'Carro' : ledgerBack === 'gestao' ? 'Gestão' : undefined}
         onBack={() => { setLedgerEdit(undefined); setLedgerCar(undefined); setView(ledgerBack) }}
         onEditDone={() => { setLedgerEdit(undefined); setLedgerCar(undefined); setView(ledgerBack) }} />}
       {view === 'errorlogs' && <ErrorLogs onBack={() => setView('home')} />}
       {view === 'tasks' && <Tasks onBack={() => setView('home')} isOwner={isOwner} myId={user?.id || ''} />}
 
-      {/* Botão flutuante — nova recepção sempre à mão no telemóvel/tablet */}
-      {canDo('reception:create') && view !== 'reception' && (
-        <button className="fab" onClick={() => { setResumeDraftId(undefined); setView('reception') }} title="Nova recepção" aria-label="Nova recepção">
-          <i className="ti ti-plus" aria-hidden="true"></i>
-        </button>
+      {/* Barra de baixo — o essencial sempre à mão no telemóvel */}
+      {eTopo && (
+        <nav className="bottom-bar" aria-label="Navegação principal">
+          <button className={view === 'home' ? 'on' : ''} onClick={() => go('home')}><i className="ti ti-home" aria-hidden="true"></i>Hoje</button>
+          {canDo('reception:read') && <button className={view === 'list' ? 'on' : ''} onClick={() => { setListFilter('all'); go('list') }}><i className="ti ti-car" aria-hidden="true"></i>Carros</button>}
+          {canDo('reception:create') && (
+            <button className="bb-new" onClick={novaEntrada} aria-label="Nova entrada de carro"><i className="ti ti-plus" aria-hidden="true"></i></button>
+          )}
+          {canLedger
+            ? <button className={view === 'lancar' ? 'on' : ''} onClick={() => go('lancar')}><i className="ti ti-receipt" aria-hidden="true"></i>Lançar{pendLedger > 0 && <span className="bb-dot" aria-label={`${pendLedger} por validar`}></span>}</button>
+            : <button className={view === 'tasks' ? 'on' : ''} onClick={() => go('tasks')}><i className="ti ti-checklist" aria-hidden="true"></i>Tarefas</button>}
+          <button onClick={() => setNavOpen(true)}><i className="ti ti-menu-2" aria-hidden="true"></i>Mais</button>
+        </nav>
       )}
       </div>
     </div>
@@ -1815,18 +1875,22 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: 'Cancelado',
 }
 
-function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, onComplete, onOpenPPI, initialFilter }: { onBack: () => void; onResume: (id: string) => void; onOpen: (id: string) => void; isOwner: boolean; onOpenOS?: (id: string) => void; onSign?: (id: string) => void; onComplete?: (id: string) => void; onOpenPPI?: (id: string) => void; initialFilter?: 'all' | 'diagnosis' | 'working' | 'ready' | 'delivered' }) {
+function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, onComplete, onOpenPPI, initialFilter }: { onBack: () => void; onResume: (id: string) => void; onOpen: (id: string) => void; isOwner: boolean; onOpenOS?: (id: string) => void; onSign?: (id: string) => void; onComplete?: (id: string) => void; onOpenPPI?: (id: string) => void; initialFilter?: ListFilter }) {
+  const podePreco = useSession(s => s.can('pricing:manage'))
+  const podeQC = useSession(s => s.can('qc:approve'))
+  const podePagar = useSession(s => s.can('payment:register'))
+  const [menu, setMenu] = useState<string | null>(null)
   const canDelete = useSession(s => s.can('jobdelete:any'))
   const canStatus = useSession(s => s.can('jobdelete:any'))   // mudar estado: só dono, nesta fase
   const [rows, setRows] = useState<any[]>([])
   const [pdfBusy, setPdfBusy] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState<'all' | 'diagnosis' | 'working' | 'ready' | 'delivered'>(initialFilter || 'all')
+  const [filter, setFilter] = useState<ListFilter>(initialFilter || 'all')
   const [loading, setLoading] = useState(true)
 
   const load = (q = '') => {
     setLoading(true)
-    api(`/api/v1/receptions${q ? `?search=${encodeURIComponent(q)}` : ''}`)
+    api(`/api/v1/receptions?limit=100${q ? `&search=${encodeURIComponent(q)}` : ''}`)
       .then(r => setRows(r.data)).catch(() => {}).finally(() => setLoading(false))
   }
   useEffect(() => { load() }, [])
@@ -1835,169 +1899,190 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
     return () => clearTimeout(t)
   }, [search])
 
+  const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
+  const [ask, setAsk] = useState<any>(null)
+  const [estadoDe, setEstadoDe] = useState<any>(null)   // carro cujo estado o dono está a mudar
+  const erro = (text: string) => setMsg({ kind: 'err', text })
+
   const exportPdf = async (joId: string) => {
     setPdfBusy(joId)
     try {
       const r = await api(`/api/v1/receptions/${joId}/pdf`)
       if (r.url) window.open(r.url, '_blank')
-    } catch { alert('Não foi possível gerar o PDF agora.') }
+    } catch { erro('Não foi possível gerar o PDF agora.') }
     finally { setPdfBusy(null) }
   }
 
-  const remove = async (jo: any) => {
-    const hard = confirm(`Apagar DEFINITIVAMENTE a entrada ${jo.number}?\n\nOK = apagar de vez (para testes)\nCancelar = manter`)
-    if (!hard) return
-    try {
-      await api(`/api/v1/receptions/${jo.id}?hard=true`, { method: 'DELETE' })
-      setRows(rs => rs.filter(r => r.id !== jo.id))
-    } catch { alert('Não foi possível apagar.') }
-  }
+  const remove = (jo: any) => setAsk({
+    text: `Apagar definitivamente a entrada ${jo.number}?`,
+    detail: `${jo.plate || ''} · ${jo.customer_name || ''}. Apaga também as fotografias. Não dá para desfazer.`,
+    yes: 'Apagar de vez', danger: true,
+    run: async () => {
+      try {
+        await api(`/api/v1/receptions/${jo.id}?hard=true`, { method: 'DELETE' })
+        setRows(rs => rs.filter(r => r.id !== jo.id))
+      } catch { erro('Não foi possível apagar.') }
+    },
+  })
 
   const STATUS_FLOW = ['awaiting_diagnosis','awaiting_quote','quote_sent','approved','in_progress','quality_check','ready','delivered']
-  const changeStatus = async (jo: any) => {
-    const options = STATUS_FLOW.map((s, i) => `${i + 1}. ${STATUS_LABEL[s]}`).join('\n')
-    const pick = prompt(`Mudar estado de ${jo.number}\nActual: ${STATUS_LABEL[jo.status] || jo.status}\n\n${options}\n\nEscreve o número do novo estado:`)
-    if (!pick) return
-    const idx = Number(pick.trim()) - 1
-    if (idx < 0 || idx >= STATUS_FLOW.length) { alert('Número inválido.'); return }
-    const status = STATUS_FLOW[idx]
+  const changeStatus = (jo: any) => setEstadoDe(jo)
+  const aplicarEstado = async (status: string) => {
+    const jo = estadoDe; setEstadoDe(null)
+    if (!jo || status === jo.status) return
     try {
       await api(`/api/v1/receptions/${jo.id}/status`, { method: 'POST', body: JSON.stringify({ status }) })
       setRows(rs => rs.map(r => r.id === jo.id ? { ...r, status } : r))
-    } catch { alert('Não foi possível mudar o estado.') }
+    } catch (e: any) { erro(e?.message || 'Não foi possível mudar o estado.') }
   }
 
-  // Atalho temporário (só dono): fechar um carro que já saiu, sem passar
-  // por todas as fases que ainda não existem no sistema.
-  const markDelivered = async (jo: any) => {
-    if (!confirm(`Marcar ${jo.number} como finalizada/entregue?\n\nUsa isto para fechar carros já tratados enquanto o ciclo completo não está pronto.`)) return
-    try {
-      await api(`/api/v1/receptions/${jo.id}/status`, { method: 'POST', body: JSON.stringify({ status: 'delivered', force: true }) })
-      setRows(rs => rs.map(r => r.id === jo.id ? { ...r, status: 'delivered' } : r))
-    } catch { alert('Não foi possível finalizar.') }
-  }
+  // Atalho (só dono): fechar um carro que já saiu, sem passar por todas as fases.
+  const markDelivered = (jo: any) => setAsk({
+    text: `Marcar ${jo.number} como finalizada/entregue?`,
+    detail: 'Usa isto para fechar carros já tratados. Ignora o controlo de qualidade.',
+    yes: 'Finalizar',
+    run: async () => {
+      try {
+        await api(`/api/v1/receptions/${jo.id}/status`, { method: 'POST', body: JSON.stringify({ status: 'delivered', force: true }) })
+        setRows(rs => rs.map(r => r.id === jo.id ? { ...r, status: 'delivered' } : r))
+      } catch { erro('Não foi possível finalizar.') }
+    },
+  })
+
+  // Fase "humana" de um carro — a mesma leitura do ecrã Hoje.
+  const faseDe = (r: any): ListFilter =>
+    r.status === 'draft' ? 'draft' : r.status === 'delivered' ? 'delivered'
+    : ['awaiting_diagnosis', 'in_diagnosis', 'diagnosis_review', 'reception'].includes(r.status) ? 'diagnosis'
+    : ['awaiting_quote', 'quote_sent'].includes(r.status) ? 'quote'
+    : ['approved', 'in_progress'].includes(r.status) ? 'working'
+    : r.status === 'quality_check' || (r.status === 'ready' && r.qc_status !== 'approved') ? 'qc'
+    : 'ready'
+  const naOficina = rows.filter(r => r.status !== 'delivered' && r.status !== 'cancelled')
+  const conta = (f: ListFilter) => f === 'all' ? naOficina.length : rows.filter(r => faseDe(r) === f).length
+  const CHIPS: [ListFilter, string][] = [['all', 'Todos'], ['draft', 'Por acabar'], ['diagnosis', 'Diagnóstico'], ['quote', 'Orçamento'],
+    ['working', 'Em trabalho'], ['qc', 'QC'], ['ready', 'Prontos'], ['delivered', 'Entregues']]
 
   return (
-    <main className="reception">
-      <div className="rec-top" style={{ marginBottom: 16 }}>
-        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
-        <h2 style={{ margin: 0, fontSize: 20 }}>Recepções</h2><span />
+    <main className="reception carros">
+      <div className="page-head">
+        <h1>Carros</h1>
+        <span className="page-head-sub">{naOficina.length} na oficina</span>
       </div>
 
       <div className="search-box">
         <i className="ti ti-search" aria-hidden="true"></i>
-        <input value={search} onChange={e => setSearch(e.target.value)}
-          placeholder="Procurar por matrícula, cliente ou nº da JO…" />
-        {search && <button className="search-clear" onClick={() => setSearch('')}><i className="ti ti-x" aria-hidden="true"></i></button>}
+        <input value={search} onChange={e => setSearch(e.target.value)} aria-label="Procurar carro"
+          placeholder="Matrícula, cliente ou nº da ordem" />
+        {search && <button className="search-clear" onClick={() => setSearch('')} aria-label="Limpar pesquisa"><i className="ti ti-x" aria-hidden="true"></i></button>}
       </div>
 
       <div className="list-filters">
-        {([['all', 'Todos'], ['diagnosis', 'Por diagnosticar'], ['working', 'Em trabalho'], ['ready', 'Prontos'], ['delivered', 'Entregues']] as const).map(([v, l]) => (
-          <button key={v} className={`filter-chip ${filter === v ? 'on' : ''}`} onClick={() => setFilter(v)}>{l}</button>
+        {CHIPS.filter(([v]) => v === 'all' || v === filter || v === 'delivered' || conta(v) > 0).map(([v, l]) => (
+          <button key={v} className={`filter-chip ${filter === v ? 'on' : ''}`} onClick={() => setFilter(v)}>
+            {l}{v !== 'delivered' && <span className="chip-n">{conta(v)}</span>}
+          </button>
         ))}
       </div>
 
-      <div className="list">
+      <Banner msg={msg} onClose={() => setMsg(null)} />
+      <ConfirmBox ask={ask} onNo={() => setAsk(null)} onYes={() => { const r = ask?.run; setAsk(null); r?.() }} />
+      {estadoDe && (
+        <div className="modal-scrim" onClick={() => setEstadoDe(null)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <div className="modal-title">Mudar o estado de {estadoDe.plate || estadoDe.number}</div>
+            <p className="modal-detail">Agora: {STATUS_LABEL[estadoDe.status] || estadoDe.status}</p>
+            <div className="estado-lista">
+              {STATUS_FLOW.map(st => (
+                <button key={st} className={st === estadoDe.status ? 'on' : ''} onClick={() => aplicarEstado(st)}>{STATUS_LABEL[st]}</button>
+              ))}
+            </div>
+            <div className="rec-nav" style={{ marginTop: 14 }}><button className="btn-ghost" onClick={() => setEstadoDe(null)}>Cancelar</button><span /></div>
+          </div>
+        </div>
+      )}
+      {menu && <div className="pop-scrim" onClick={() => setMenu(null)} />}
+      <div className="car-list">
         {(() => {
-          const visible = rows.filter(r => {
-            if (filter === 'all') return r.status !== 'delivered' && r.status !== 'cancelled'
-            if (filter === 'diagnosis') return r.status === 'awaiting_diagnosis' || r.status === 'in_diagnosis' || r.status === 'diagnosis_review'
-            if (filter === 'working') return r.status === 'awaiting_quote' || r.status === 'quote_sent' || r.status === 'approved' || r.status === 'in_progress' || r.status === 'quality_check'
-            if (filter === 'ready') return r.status === 'ready'
-            if (filter === 'delivered') return r.status === 'delivered'
-            return true
-          })
+          const visible = rows.filter(r => filter === 'all' ? (r.status !== 'delivered' && r.status !== 'cancelled') : faseDe(r) === filter)
           return <>
           {visible.map(r => {
           const isDraft = r.status === 'draft'
           // Faltam fotos obrigatórias? 14 normalmente, 11 se a entrada ficou
-          // pendente (as 3 do painel exigem ignição). Serve para qualquer
-          // razão de falta, não só a bateria.
+          // pendente (as 3 do painel exigem ignição). Entrada rápida não tem
+          // fotos por desenho — nunca é "incompleta" por isso.
           const minFotos = r.entry_pending_reason ? 11 : 14
-          // Entrada rápida não tem fotos por desenho — nunca é "incompleta" por isso.
           const isQuick = r.entry_type === 'quick'
           const fotosEmFalta = !isDraft && !isQuick && Number(r.req_photos ?? minFotos) < minFotos
           const incompleta = !isDraft && !isQuick && !r.entry_completed_at && (!!r.entry_pending_reason || fotosEmFalta)
+          const fase = faseDe(r)
+          const temOS = !isDraft && r.signed_at && !incompleta && !r.has_ppi && !!onOpenOS
+          const abrirOS = () => onOpenOS && onOpenOS(r.id)
+
+          // O PRÓXIMO PASSO: uma frase e, quando há algo a fazer aqui, um só botão.
+          let passo: { txt: string; btn?: string; run?: () => void; alerta?: boolean } = { txt: '' }
+          if (isDraft) passo = { txt: 'Entrada por acabar', btn: 'Continuar', run: () => onResume(r.id), alerta: true }
+          else if (r.deletion_status === 'pending') passo = { txt: 'Pedido de eliminação pendente', alerta: true }
+          else if (incompleta && onComplete) passo = { txt: r.entry_pending_reason ? 'Falta o km e as fotos do painel' : `Faltam ${minFotos - Number(r.req_photos ?? 0)} fotos obrigatórias`, btn: 'Completar entrada', run: () => onComplete(r.id), alerta: true }
+          else if (!r.signed_at && r.status !== 'delivered' && onSign) passo = { txt: 'Falta a assinatura do cliente', btn: 'Assinar', run: () => onSign(r.id), alerta: true }
+          else if (r.has_ppi && onOpenPPI) passo = r.ppi_status === 'done'
+            ? { txt: 'Inspeção PPI concluída', btn: 'Ver PPI', run: () => onOpenPPI(r.id) }
+            : { txt: 'Inspeção PPI por fazer', btn: r.ppi_id ? 'Continuar PPI' : 'Abrir PPI', run: () => onOpenPPI(r.id) }
+          else if (fase === 'delivered') passo = { txt: r.payment_status === 'paid' ? 'Entregue · pago' : 'Entregue' }
+          else if (!temOS) passo = { txt: STATUS_LABEL[r.status] || r.status }
+          else if (r.status === 'diagnosis_review') passo = { txt: 'Diagnóstico à espera de autorização', btn: 'Abrir', run: abrirOS }
+          else if (fase === 'diagnosis') passo = { txt: 'Falta fazer o diagnóstico', btn: r.os_opened_at ? 'Abrir' : 'Iniciar', run: abrirOS }
+          else if (r.status === 'awaiting_quote') passo = podePreco
+            ? { txt: 'Falta dar preço ao orçamento', btn: 'Dar preço', run: abrirOS, alerta: true }
+            : { txt: 'À espera do preço', btn: 'Abrir', run: abrirOS }
+          else if (r.status === 'quote_sent') passo = { txt: 'À espera da resposta do cliente', btn: 'Abrir', run: abrirOS }
+          else if (fase === 'working') passo = { txt: r.status === 'approved' ? 'Aprovado · por começar' : 'Trabalho a decorrer', btn: 'Abrir', run: abrirOS }
+          else if (fase === 'qc') passo = podeQC
+            ? { txt: 'Falta o controlo de qualidade', btn: 'Fazer QC', run: abrirOS, alerta: true }
+            : { txt: 'No controlo de qualidade', btn: 'Abrir', run: abrirOS }
+          else if (r.payment_status !== 'paid') passo = podePagar
+            ? { txt: 'Pronto · por cobrar', btn: 'Registar pagamento', run: abrirOS, alerta: true }
+            : { txt: 'Pronto · por cobrar', btn: 'Abrir', run: abrirOS }
+          else passo = { txt: 'Pago · pronto a entregar', btn: 'Entregar', run: abrirOS }
+
+          const rotulo = isDraft ? 'Rascunho' : fase === 'qc' && r.status === 'ready' ? 'Falta o QC' : (STATUS_LABEL[r.status] || r.status)
           return (
-            <div key={r.id} className={`list-row clickable ${isDraft ? 'is-draft' : ''}`}>
-              <span className="jo-num" onClick={() => onOpen(r.id)}>{r.number}</span>
-              <span className="plate" onClick={() => onOpen(r.id)}>{r.plate}</span>
-              <div className="list-main" onClick={() => onOpen(r.id)}>
-                <div className="list-name">{r.customer_name}
-                  {(r.priority_level === 'urgent' || r.priority_level === 'high') && <span className={`list-prio p-${r.priority_level}`}>{r.priority_level === 'urgent' ? 'URGENTE' : 'ALTA'}</span>}
-                </div>
-                <div className="list-sub">{r.brand} {r.model}{isDraft ? '' : ` · ${r.photo_count} fotos${r.signed_at ? ' · assinada' : ''}`}</div>
-              </div>
-              <div className="list-tags">
-              {r.is_non_runner && <span className="badge-nr" title="Entrou sem funcionar"><i className="ti ti-engine-off" aria-hidden="true"></i> Não funciona</span>}
-              {incompleta && (
-                <span className="badge-incomplete" title={r.entry_pending_reason
-                  ? `Falta o km e as fotos do painel — ${r.entry_pending_reason}`
-                  : `Faltam ${minFotos - Number(r.req_photos ?? 0)} fotos obrigatórias`}>
-                  <i className="ti ti-camera-off" aria-hidden="true"></i> Entrada incompleta
+            <div key={r.id} className={`car-card ${isDraft ? 'is-draft' : ''}`}>
+              <button className="car-main" onClick={() => (passo.run ? passo.run() : onOpen(r.id))}>
+                <span className="car-id">
+                  <span className="car-plate">{r.plate || '—'}</span>
+                  <span className="car-sub">{[[r.brand, r.model].filter(Boolean).join(' '), r.customer_name].filter(Boolean).join(' · ')}</span>
                 </span>
+                <span className={`pill ph-${fase}`}>{rotulo}</span>
+              </button>
+              {(r.priority_level === 'urgent' || r.priority_level === 'high' || r.is_non_runner) && (
+                <div className="car-tags">
+                  {(r.priority_level === 'urgent' || r.priority_level === 'high') && <span className={`list-prio p-${r.priority_level}`}>{r.priority_level === 'urgent' ? 'URGENTE' : 'PRIORIDADE ALTA'}</span>}
+                  {r.is_non_runner && <span className="badge-nr"><i className="ti ti-engine-off" aria-hidden="true"></i> Não funciona</span>}
+                </div>
               )}
-              {isDraft
-                ? <span className="badge-draft"><i className="ti ti-device-floppy" aria-hidden="true"></i> Rascunho</span>
-                : r.deletion_status === 'pending'
-                  ? <span className="badge-del"><i className="ti ti-trash-x" aria-hidden="true"></i> Elim. pendente</span>
-                  : !r.signed_at
-                    ? <span className="badge-unsigned" title="Finalização não chegou a selar a assinatura"><i className="ti ti-writing-off" aria-hidden="true"></i> Por assinar</span>
-                    : <span className={`status s-${r.status}`}>{STATUS_LABEL[r.status] || r.status}</span>}
-              {['ready', 'delivered'].includes(r.status) && r.payment_status === 'paid' && <span className="pay-tag paid"><i className="ti ti-cash" aria-hidden="true"></i> pago</span>}
-              {r.status === 'ready' && r.payment_status !== 'paid' && <span className="pay-tag unpaid"><i className="ti ti-alert-triangle" aria-hidden="true"></i> por pagar</span>}
-              </div>
-              <div className="list-acts">
-              {isDraft && (
-                <button className="btn-primary btn-sm" onClick={() => onResume(r.id)} title="Continuar lançamento">
-                  Continuar <i className="ti ti-arrow-right" aria-hidden="true"></i>
-                </button>
-              )}
-              {incompleta && onComplete && (
-                <button className="btn-primary btn-sm" onClick={() => onComplete(r.id)} title="Registar o km e as fotos do painel">
-                  <i className="ti ti-battery" aria-hidden="true"></i> Completar entrada
-                </button>
-              )}
-              {!isDraft && !r.signed_at && r.status !== 'delivered' && onSign && (
-                <button className="btn-primary btn-sm" onClick={() => onSign(r.id)} title="Completar a assinatura em falta">
-                  <i className="ti ti-signature" aria-hidden="true"></i> Assinar agora
-                </button>
-              )}
-              {!isDraft && r.signed_at && r.has_ppi && onOpenPPI && (
-                r.ppi_status === 'done'
-                  ? <button className="btn-ghost btn-sm" onClick={() => onOpenPPI(r.id)} title="Ver inspeção PPI concluída"><i className="ti ti-clipboard-check" aria-hidden="true"></i> PPI concluído</button>
-                  : <button className="btn-primary btn-sm" onClick={() => onOpenPPI(r.id)} title="Abrir inspeção PPI"><i className="ti ti-clipboard-list" aria-hidden="true"></i> {r.ppi_id ? 'Continuar PPI' : 'Abrir PPI'}</button>
-              )}
-              {!isDraft && r.signed_at && r.status !== 'delivered' && onOpenOS && !incompleta && !r.has_ppi && (
-                r.os_opened_at
-                  ? <button className="btn-ghost btn-sm" onClick={() => onOpenOS(r.id)} title="Ver Ordem de Serviço"><i className="ti ti-clipboard-list" aria-hidden="true"></i> Ver OS</button>
-                  : <button className="btn-primary btn-sm" onClick={() => onOpenOS(r.id)} title="Iniciar Ordem de Serviço"><i className="ti ti-tools" aria-hidden="true"></i> Iniciar OS</button>
-              )}
-              {!isDraft && r.signed_at && (
-                <button className="btn-ghost btn-sm" disabled={pdfBusy === r.id} onClick={() => exportPdf(r.id)} title="Exportar PDF de entrada">
-                  <i className={`ti ${pdfBusy === r.id ? 'ti-loader' : 'ti-file-type-pdf'}`} aria-hidden="true"></i>
-                </button>
-              )}
-              {!isDraft && canStatus && (
-                <button className="btn-ghost btn-sm" onClick={() => changeStatus(r)} title="Mudar estado">
-                  <i className="ti ti-adjustments" aria-hidden="true"></i>
-                </button>
-              )}
-              {!isDraft && canStatus && r.status !== 'delivered' && (
-                <button className="btn-ghost btn-sm" onClick={() => markDelivered(r)} title="Marcar como finalizada">
-                  <i className="ti ti-checkbox" aria-hidden="true"></i>
-                </button>
-              )}
-              {canDelete && (
-                <button className="btn-ghost btn-sm danger" onClick={() => remove(r)} title="Apagar entrada">
-                  <i className="ti ti-trash" aria-hidden="true"></i>
-                </button>
-              )}
+              <div className="car-foot">
+                <span className={`car-next ${passo.alerta ? 'alerta' : ''}`}>{passo.txt}<span className="car-num">{r.number}</span></span>
+                <div className="car-acts">
+                  {passo.btn && <button className="btn-primary btn-sm" onClick={passo.run}>{passo.btn}</button>}
+                  <button className="btn-icon" aria-label={`Mais opções para ${r.plate || r.number}`} aria-expanded={menu === r.id} onClick={() => setMenu(menu === r.id ? null : r.id)}>
+                    <i className={`ti ${pdfBusy === r.id ? 'ti-loader' : 'ti-dots-vertical'}`} aria-hidden="true"></i>
+                  </button>
+                  {menu === r.id && (
+                    <div className="pop-menu" role="menu">
+                      <button role="menuitem" onClick={() => { setMenu(null); onOpen(r.id) }}><i className="ti ti-file-text" aria-hidden="true"></i> Ver ficha de entrada</button>
+                      {temOS && <button role="menuitem" onClick={() => { setMenu(null); abrirOS() }}><i className="ti ti-tools" aria-hidden="true"></i> Abrir o trabalho</button>}
+                      {!isDraft && r.signed_at && <button role="menuitem" onClick={() => { setMenu(null); exportPdf(r.id) }}><i className="ti ti-file-type-pdf" aria-hidden="true"></i> PDF da entrada</button>}
+                      {!isDraft && canStatus && <button role="menuitem" onClick={() => { setMenu(null); changeStatus(r) }}><i className="ti ti-adjustments" aria-hidden="true"></i> Mudar estado</button>}
+                      {!isDraft && canStatus && r.status !== 'delivered' && <button role="menuitem" onClick={() => { setMenu(null); markDelivered(r) }}><i className="ti ti-checkbox" aria-hidden="true"></i> Marcar como finalizada</button>}
+                      {canDelete && <button role="menuitem" className="danger" onClick={() => { setMenu(null); remove(r) }}><i className="ti ti-trash" aria-hidden="true"></i> Apagar entrada</button>}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )
         })}
-        {!loading && visible.length === 0 && <p className="empty">{search ? 'Nada encontrado para essa pesquisa.' : rows.length === 0 ? 'Ainda sem recepções.' : 'Nenhum carro neste filtro.'}</p>}
+        {!loading && visible.length === 0 && <p className="empty">{search ? 'Nada encontrado para essa pesquisa.' : rows.length === 0 ? 'Ainda sem carros.' : 'Nenhum carro neste filtro.'}</p>}
           </>
         })()}
       </div>
@@ -4214,7 +4299,7 @@ const ORDEM: Record<string, number> = { awaiting_diagnosis: 0, pending: 1, in_pr
 // ── QC de saída — checklist antes da entrega ─────────────────
 // Fecha o buraco que deixou um carro sair sem controlo. Não se
 // entrega sem QC aprovado (imposto também no backend).
-function QCPanel({ joId, say, onDelivered }: { joId: string; say: (k: 'err' | 'ok', t: string) => void; onDelivered: () => void }) {
+function QCPanel({ joId, say, onDelivered, onChanged }: { joId: string; say: (k: 'err' | 'ok', t: string) => void; onDelivered: () => void; onChanged?: () => void }) {
   const [data, setData] = useState<any>(null)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -4239,13 +4324,13 @@ function QCPanel({ joId, say, onDelivered }: { joId: string; say: (k: 'err' | 'o
   }
   const aprovar = async () => {
     setBusy(true)
-    try { await api(`/api/v1/os/${joId}/qc/approve`, { method: 'POST' }); await load(); say('ok', 'QC aprovado. O carro pode ser entregue.') }
+    try { await api(`/api/v1/os/${joId}/qc/approve`, { method: 'POST' }); await load(); onChanged?.(); say('ok', 'QC aprovado. O carro pode ser entregue.') }
     catch (e: any) { say('err', e?.message || 'Faltam verificações obrigatórias.') }
     finally { setBusy(false) }
   }
   const reprovar = async () => {
     setBusy(true)
-    try { await api(`/api/v1/os/${joId}/qc/reject`, { method: 'POST', body: JSON.stringify({ reason: rejReason }) }); setRejecting(false); setRejReason(''); await load(); say('ok', 'QC reprovado — volta para correção.') }
+    try { await api(`/api/v1/os/${joId}/qc/reject`, { method: 'POST', body: JSON.stringify({ reason: rejReason }) }); setRejecting(false); setRejReason(''); await load(); onChanged?.(); say('ok', 'QC reprovado — volta para correção.') }
     catch (e: any) { say('err', e?.message || 'Erro.') }
     finally { setBusy(false) }
   }
@@ -5027,8 +5112,8 @@ function moneyFromValue(v: any): string {
 // Formatar um valor para mostrar (listas, totais): 12.500,00 MT
 function fmtMT(v: any): string { return (moneyFromValue(v) || '0,00') + ' MT' }
 
-function MoneyInput({ value, onChange, placeholder, autoFocus, style }: {
-  value: any; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean; style?: any
+function MoneyInput({ value, onChange, placeholder, autoFocus, style, id }: {
+  value: any; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean; style?: any; id?: string
 }) {
   const [text, setText] = useState(() => moneyFromValue(value))
   useEffect(() => {
@@ -5049,7 +5134,7 @@ function MoneyInput({ value, onChange, placeholder, autoFocus, style }: {
   }
   return (
     <div className="money-input" style={style}>
-      <input type="text" inputMode="decimal" autoComplete="off" value={text}
+      <input id={id} type="text" inputMode="decimal" autoComplete="off" value={text}
         placeholder={placeholder ?? '0,00'} autoFocus={autoFocus}
         onChange={e => mudar(e.target.value)}
         onFocus={() => { const p = parseMoneyText(text); if (p.dec === '00') setText(moneyDisplay({ int: p.int, dec: null }, false)) }}
@@ -5067,11 +5152,15 @@ function MoneyInput({ value, onChange, placeholder, autoFocus, style }: {
 const LANC_METHODS: [string, string][] = [['bank', 'Banco'], ['cash', 'Caixa (dinheiro)'], ['mpesa', 'M-Pesa'], ['emola', 'e-Mola'], ['card', 'Cartão']]
 const LANC_METHOD_LABEL: Record<string, string> = Object.fromEntries(LANC_METHODS)
 function Lancar({ onBack, editEntry, onEditDone, carro, backLabel }: { onBack: () => void; editEntry?: any; onEditDone?: () => void; carro?: any; backLabel?: string }) {
+  // O dono lança tudo e valida. Quem tem só "ledger:own" lança gastos e
+  // recebimentos, vê apenas os seus e fica à espera da validação.
+  const dono = useSession(s => s.can('pricing:manage'))
+  const meuId = useSession(s => s.user?.id)
   const hoje = new Date().toISOString().slice(0, 10)
-  const vazio = { entryDate: hoje, flow: 'cost', neutralDir: 'out', categoryId: '', departmentId: '', isTransversal: false,
-    paymentMethod: 'bank', amount: '', description: '', counterparty: '', plate: '', make: '', model: '', engine: '',
+  const vazio = { entryDate: hoje, flow: 'cost', neutralDir: 'out', categoryId: '', departmentId: '', isTransversal: !dono, alvo: 'shop',
+    paymentMethod: dono ? 'bank' : 'cash', amount: '', description: '', counterparty: '', plate: '', make: '', model: '', engine: '',
     jobOrderId: '', carLabel: '' }
-  const rotuloCarro = (c: any) => [c.number, c.plate, [c.brand, c.model].filter(Boolean).join(' ')].filter(Boolean).join(' · ')
+  const rotuloCarro = (c: any) => [c.plate, [c.brand, c.model].filter(Boolean).join(' ')].filter(Boolean).join(' · ') || c.number || 'Carro'
   const [manual, setManual] = useState(false)
   const [carQ, setCarQ] = useState('')
   const [cars, setCars] = useState<any[]>([])
@@ -5080,31 +5169,40 @@ function Lancar({ onBack, editEntry, onEditDone, carro, backLabel }: { onBack: (
   const [cats, setCats] = useState<any[]>([])
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
-  const [recentes, setRecentes] = useState<any[]>([])
+  const [todos, setTodos] = useState<any[]>([])
+  const [mais, setMais] = useState(false)
+  const [foto, setFoto] = useState<Blob | null>(null)
+  const [temFactura, setTemFactura] = useState(false)
+  const [soPend, setSoPend] = useState(false)
+  const [todasCats, setTodasCats] = useState(false)
+  const fotoRef = useRef<HTMLInputElement>(null)
 
-  const loadRecentes = () => api('/api/v1/ledger').then(r => setRecentes((r.entries || []).slice(0, 8))).catch(() => {})
+  const loadRecentes = () => api('/api/v1/ledger').then(r => setTodos(r.entries || [])).catch(() => {})
   const [editId, setEditId] = useState<string | null>(null)
   const [editSource, setEditSource] = useState<string | null>(null)
+  const limpar = () => { setEditId(null); setEditSource(null); setFoto(null); setTemFactura(false); setManual(false) }
   const carregar = (r: any) => {
+    if (!dono && !r.pending_review) { setMsg({ kind: 'err', text: 'Este lançamento já foi validado — só o dono o pode alterar.' }); window.scrollTo({ top: 0, behavior: 'smooth' }); return }
     const entra = Number(r.revenue) > 0
+    const temC = !!(r.job_order_id || r.plate || r.make || r.model)
     setF({
       entryDate: String(r.entry_date || hoje).slice(0, 10),
       flow: r.flow || (entra ? 'revenue' : 'cost'), neutralDir: entra ? 'in' : 'out',
-      categoryId: r.category_id || '', departmentId: r.department_id || '', isTransversal: !!r.is_transversal,
+      categoryId: r.category_id || '', departmentId: r.department_id || '', isTransversal: !!r.is_transversal, alvo: temC ? 'car' : 'shop',
       paymentMethod: r.payment_method || 'bank', amount: String(Number(entra ? r.revenue : r.cost)),
       description: r.description || '', counterparty: r.counterparty || '',
       plate: r.plate || '', make: r.make || '', model: r.model || '', engine: r.engine || '',
       jobOrderId: r.job_order_id || '', carLabel: r.job_order_id ? rotuloCarro({ plate: r.plate, brand: r.make, model: r.model }) : '',
     })
-    setManual(!r.job_order_id && !!(r.plate || r.make || r.model))
-    setEditId(r.id); setEditSource(r.source || null); setMsg(null)
+    setManual(!r.job_order_id && temC)
+    setEditId(r.id); setEditSource(r.source || null); setMsg(null); setFoto(null); setTemFactura(!!r.has_receipt); setMais(true)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   useEffect(() => { if (editEntry) carregar(editEntry) }, [editEntry])
-  const cancelarEdicao = () => { setEditId(null); setEditSource(null); setF(vazio); if (editEntry) onEditDone?.() }
+  const cancelarEdicao = () => { limpar(); setF(vazio); if (editEntry) onEditDone?.() }
   const apagar = async () => {
     if (!editId || !confirm('Apagar este lançamento?')) return
-    try { await api(`/api/v1/ledger/${editId}`, { method: 'DELETE' }); setMsg({ kind: 'ok', text: 'Apagado.' }); setEditId(null); setF(vazio); loadRecentes(); if (editEntry) onEditDone?.() }
+    try { await api(`/api/v1/ledger/${editId}`, { method: 'DELETE' }); setMsg({ kind: 'ok', text: 'Apagado.' }); limpar(); setF(vazio); loadRecentes(); if (editEntry) onEditDone?.() }
     catch (e: any) { setMsg({ kind: 'err', text: e?.message || 'Não apagou.' }) }
   }
   useEffect(() => {
@@ -5120,18 +5218,20 @@ function Lancar({ onBack, editEntry, onEditDone, carro, backLabel }: { onBack: (
     if (g) g[1].push(c); else grupos.push([c.group_name, [c]])
   }
   const catSel = cats.find((c: any) => c.id === f.categoryId)
-  const deptSel = depts.find((d: any) => d.id === f.departmentId)
+  const deptsCarro = depts.filter((d: any) => d.tracks_vehicles)
   const neutral = f.flow === 'neutral'
-  const temCarro = !neutral && !f.isTransversal && deptSel?.tracks_vehicles
+  const temCarro = !neutral && f.alvo === 'car'
+
+  const paraCarro = (extra: any = {}) => setF((p: any) => {
+    const actual = deptsCarro.find((d: any) => d.id === p.departmentId)
+    return { ...p, alvo: 'car', isTransversal: false, departmentId: actual ? actual.id : (deptsCarro[0]?.id || ''), ...extra }
+  })
+  const paraOficina = () => setF((p: any) => ({ ...p, alvo: 'shop', isTransversal: !dono, departmentId: '', jobOrderId: '', carLabel: '', plate: '', make: '', model: '', engine: '' }))
+
+  // Vindo do ecrã de um carro: já fica escolhido.
   useEffect(() => {
-    if (!carro) return
-    setF((p: any) => ({ ...p, flow: 'cost', jobOrderId: carro.id, carLabel: rotuloCarro(carro), plate: carro.plate || '', make: carro.brand || '', model: carro.model || '' }))
-  }, [carro])
-  // vindo de um carro: pré-escolhe o 1.º departamento que trabalha em carros
-  useEffect(() => {
-    if (carro && !f.departmentId && !f.isTransversal && depts.length) {
-      const d = depts.find((x: any) => x.tracks_vehicles); if (d) setF((p: any) => ({ ...p, departmentId: d.id }))
-    }
+    if (!carro || !depts.length) return
+    paraCarro({ flow: 'cost', jobOrderId: carro.id, carLabel: rotuloCarro(carro), plate: carro.plate || '', make: carro.brand || '', model: carro.model || '' })
   }, [carro, depts])
   useEffect(() => {
     if (!temCarro || f.jobOrderId || manual) return
@@ -5139,17 +5239,38 @@ function Lancar({ onBack, editEntry, onEditDone, carro, backLabel }: { onBack: (
     return () => clearTimeout(t)
   }, [carQ, temCarro, f.jobOrderId, manual])
 
-  const mudarSentido = (flow: string) => setF({ ...f, flow, categoryId: '' })
+  const mudarSentido = (flow: string) => { setTodasCats(false); setF({ ...f, flow, categoryId: '' }) }
+  // Plano de categorias comprido: mostra primeiro as que mais se usam.
+  const uso = new Map<string, number>()
+  for (const r of todos) if (r.category_id) uso.set(r.category_id, (uso.get(r.category_id) || 0) + 1)
+  const frequentes = catsDoSentido.length > 8
+    ? catsDoSentido.filter((c: any) => uso.has(c.id)).sort((a: any, b: any) => (uso.get(b.id) || 0) - (uso.get(a.id) || 0)).slice(0, 6) : []
+  const resumido = !todasCats && frequentes.length >= 3
+  const curtas = resumido ? [...frequentes, ...(catSel && catSel.flow === f.flow && !frequentes.some((c: any) => c.id === catSel.id) ? [catSel] : [])] : []
+
+  const enviarFactura = async (id: string, blob: Blob) => {
+    const img = await compressImage(blob, 1400, 0.7)
+    const b64 = await new Promise<string>((res, rej) => {
+      const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.onerror = () => rej(new Error('leitura')); fr.readAsDataURL(img)
+    })
+    await api(`/api/v1/ledger/${id}/receipt`, { method: 'POST', body: JSON.stringify({ imageBase64: b64 }) })
+  }
+  const verFactura = async () => {
+    if (!editId) return
+    try { const r = await api(`/api/v1/ledger/${editId}/receipt`); if (r.url) window.open(r.url, '_blank') }
+    catch (e: any) { setMsg({ kind: 'err', text: e?.message || 'Não foi possível abrir a factura.' }) }
+  }
 
   const lancar = async () => {
     const val = parseFloat(String(f.amount).replace(',', '.'))
     if (isNaN(val) || val <= 0) { setMsg({ kind: 'err', text: 'Escreve o valor.' }); return }
     if (!f.categoryId) { setMsg({ kind: 'err', text: 'Escolhe a categoria.' }); return }
-    if (!neutral && !f.isTransversal && !f.departmentId) { setMsg({ kind: 'err', text: 'Escolhe o departamento (ou transversal).' }); return }
+    if (temCarro && !f.jobOrderId && !(manual && (f.plate || f.make || f.model))) { setMsg({ kind: 'err', text: 'Escolhe o carro (ou muda para "A oficina").' }); return }
+    if (!neutral && !f.isTransversal && !f.departmentId) { setMsg({ kind: 'err', text: temCarro ? 'Escolhe o departamento do carro.' : 'Escolhe o departamento (ou "Toda a oficina").' }); return }
     const entra = f.flow === 'revenue' || (neutral && f.neutralDir === 'in')
     setBusy(true); setMsg(null)
     try {
-      await api(editId ? `/api/v1/ledger/${editId}` : '/api/v1/ledger', { method: editId ? 'PATCH' : 'POST', body: JSON.stringify({
+      const r = await api(editId ? `/api/v1/ledger/${editId}` : '/api/v1/ledger', { method: editId ? 'PATCH' : 'POST', body: JSON.stringify({
         entryDate: f.entryDate, categoryId: f.categoryId,
         departmentId: neutral || f.isTransversal ? null : f.departmentId, isTransversal: !neutral && f.isTransversal,
         paymentMethod: f.paymentMethod || null,
@@ -5159,48 +5280,57 @@ function Lancar({ onBack, editEntry, onEditDone, carro, backLabel }: { onBack: (
         model: temCarro ? (f.model || null) : null, engine: temCarro ? (f.engine || null) : null,
         cost: entra ? 0 : val, revenue: entra ? val : 0,
       }) })
+      const id = editId || r?.id
+      let avisoFactura = ''
+      if (foto && id) {
+        try { await enviarFactura(id, foto) }
+        catch { avisoFactura = ' A fotografia da factura não subiu — abre o lançamento e tenta de novo.' }
+      }
+      const kind = avisoFactura ? 'err' : 'ok'
       if (editId) {
-        setMsg({ kind: 'ok', text: 'Alterado.' }); setEditId(null); setEditSource(null); setF(vazio); loadRecentes()
-        if (editEntry) onEditDone?.()
+        setMsg({ kind, text: 'Alterado.' + avisoFactura }); limpar(); setF(vazio); loadRecentes()
+        if (editEntry && !avisoFactura) onEditDone?.()
         return
       }
-      setMsg({ kind: 'ok', text: 'Lançado.' })
-      // mantém sentido, data, departamento e meio — acelera lançar vários seguidos
+      setMsg({ kind, text: (dono ? 'Lançado.' : 'Lançado. Fica por validar pelo dono.') + avisoFactura })
+      // mantém sentido, data, destino e meio — acelera lançar vários seguidos
       setF({ ...vazio, flow: f.flow, neutralDir: f.neutralDir, entryDate: f.entryDate, departmentId: f.departmentId,
-        isTransversal: f.isTransversal, paymentMethod: f.paymentMethod,
-        ...(carro ? { jobOrderId: f.jobOrderId, carLabel: f.carLabel, plate: f.plate, make: f.make, model: f.model } : {}) })
+        isTransversal: f.isTransversal, alvo: f.alvo, paymentMethod: f.paymentMethod,
+        ...(f.alvo === 'car' ? { jobOrderId: f.jobOrderId, carLabel: f.carLabel, plate: f.plate, make: f.make, model: f.model } : {}) })
+      setFoto(null); setTemFactura(false)
       loadRecentes()
     } catch (e: any) { setMsg({ kind: 'err', text: e?.message || 'Não guardou.' }) }
     finally { setBusy(false) }
   }
 
+  const validar = async (id: string) => {
+    try { await api(`/api/v1/ledger/${id}/approve`, { method: 'POST' }); loadRecentes() }
+    catch (e: any) { setMsg({ kind: 'err', text: e?.message || 'Não validou.' }) }
+  }
+
   const sinal = (r: any) => Number(r.revenue) > 0 ? 'in' : 'out'
+  const pendentes = todos.filter((r: any) => r.pending_review)
+  const lista = (dono && soPend ? pendentes : todos).slice(0, dono ? 60 : 60)
 
   return (
-    <main className="reception">
-      <div className="rec-top" style={{ marginBottom: 16 }}>
-        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> {backLabel || 'Início'}</button>
-        <h2 style={{ margin: 0, fontSize: 20 }}>Lançar</h2><span />
+    <main className="reception lancar">
+      <div className="page-head">
+        <h1>{editId ? 'Corrigir lançamento' : 'Lançar'}</h1>
+        {backLabel && <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> {backLabel}</button>}
       </div>
 
-      {msg && <div className={`banner ${msg.kind === 'ok' ? 'ok' : 'err'}`} style={{ marginBottom: 12 }}>{msg.text}</div>}
+      {msg && <div className={`banner ${msg.kind === 'ok' ? 'ok' : 'err'}`} style={{ marginBottom: 12 }} role="status">{msg.text}</div>}
 
-      {editId && (
+      {editId && editSource === 'os' && (
         <div className="banner i" style={{ marginBottom: 12 }}>
-          <strong>A corrigir um lançamento.</strong>{editSource === 'os' ? ' Este veio do pagamento de um carro — se o pagamento for desmarcado ou refeito, é recriado automaticamente.' : ''}
+          Este veio do pagamento de um carro — se o pagamento for desmarcado ou refeito, é recriado automaticamente.
         </div>
       )}
-      <div className="card">
-        <div className="lanc-flow">
-          <button className={`lanc-flow-btn ${f.flow === 'cost' ? 'on cost' : ''}`} onClick={() => mudarSentido('cost')}>
-            <i className="ti ti-arrow-down-left" aria-hidden="true"></i> Despesa
-          </button>
-          <button className={`lanc-flow-btn ${f.flow === 'revenue' ? 'on rev' : ''}`} onClick={() => mudarSentido('revenue')}>
-            <i className="ti ti-arrow-up-right" aria-hidden="true"></i> Receita
-          </button>
-          <button className={`lanc-flow-btn ${f.flow === 'neutral' ? 'on neu' : ''}`} onClick={() => mudarSentido('neutral')}>
-            <i className="ti ti-arrows-exchange" aria-hidden="true"></i> Interno
-          </button>
+      <div className="card lanc-card">
+        <div className="seg" role="tablist" aria-label="Tipo de lançamento">
+          <button role="tab" aria-selected={f.flow === 'cost'} className={f.flow === 'cost' ? 'on' : ''} onClick={() => mudarSentido('cost')}>Gasto</button>
+          <button role="tab" aria-selected={f.flow === 'revenue'} className={f.flow === 'revenue' ? 'on' : ''} onClick={() => mudarSentido('revenue')}>Recebimento</button>
+          {dono && <button role="tab" aria-selected={neutral} className={neutral ? 'on' : ''} onClick={() => mudarSentido('neutral')}>Interno</button>}
         </div>
         {neutral && (
           <div className="lanc-neutral-note">
@@ -5212,130 +5342,193 @@ function Lancar({ onBack, editEntry, onEditDone, carro, backLabel }: { onBack: (
           </div>
         )}
 
-        <div className="lanc-row2">
-          <div>
-            <label className="fl">Valor (MT)</label>
-            <MoneyInput value={f.amount} onChange={v => setF({ ...f, amount: v })} autoFocus />
-          </div>
-          <div>
-            <label className="fl">Data</label>
-            <input type="date" value={f.entryDate} onChange={e => setF({ ...f, entryDate: e.target.value })} />
+        <div className="lanc-bloco">
+          <label className="sec-title" htmlFor="lanc-valor">Valor</label>
+          <div className="money-big">
+            <MoneyInput id="lanc-valor" value={f.amount} onChange={v => setF({ ...f, amount: v })} placeholder="0,00" />
+            <span>MT</span>
           </div>
         </div>
 
-        <label className="fl" style={{ marginTop: 10 }}>Categoria</label>
-        <select value={f.categoryId} onChange={e => setF({ ...f, categoryId: e.target.value })}>
-          <option value="">— escolher —</option>
-          {grupos.map(([g, lista]) => (
-            <optgroup key={g} label={g}>
-              {lista.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </optgroup>
+        <div className="lanc-bloco">
+          <div className="sec-title">Categoria</div>
+          {catsDoSentido.length === 0 && <div className="lanc-nature">Sem categorias para este tipo.</div>}
+          {resumido && (
+            <div className="chips">
+              {curtas.map((c: any) => (
+                <button key={c.id} className={`chip ${f.categoryId === c.id ? 'on' : ''}`} aria-pressed={f.categoryId === c.id} onClick={() => setF({ ...f, categoryId: c.id })}>{c.name}</button>
+              ))}
+              <button className="chip chip-mais" onClick={() => setTodasCats(true)}>Todas as categorias…</button>
+            </div>
+          )}
+          {!resumido && grupos.map(([g, listaCats]) => (
+            <div key={g || 'x'} className="chip-group">
+              {grupos.length > 1 && g && <div className="chip-group-t">{g}</div>}
+              <div className="chips">
+                {listaCats.map((c: any) => (
+                  <button key={c.id} className={`chip ${f.categoryId === c.id ? 'on' : ''}`} aria-pressed={f.categoryId === c.id} onClick={() => setF({ ...f, categoryId: c.id })}>{c.name}</button>
+                ))}
+              </div>
+            </div>
           ))}
-        </select>
-        {catSel?.nature && <div className="lanc-nature">{catSel.nature === 'fixed' ? 'Custo fixo — repete-se todos os meses' : 'Custo variável'}</div>}
+          {dono && catSel?.nature && <div className="lanc-nature">{catSel.nature === 'fixed' ? 'Custo fixo — repete-se todos os meses' : 'Custo variável'}</div>}
+        </div>
 
         {!neutral && (
-          <>
-            <label className="fl" style={{ marginTop: 10 }}>Departamento</label>
-            <div className="lanc-depts">
-              {depts.map((d: any) => (
-                <button key={d.id} className={!f.isTransversal && f.departmentId === d.id ? 'on' : ''}
-                  onClick={() => setF({ ...f, departmentId: d.id, isTransversal: false })}>{d.name}</button>
-              ))}
-              <button className={f.isTransversal ? 'on' : ''} onClick={() => setF({ ...f, isTransversal: true, departmentId: '' })}>Transversal</button>
+          <div className="lanc-bloco">
+            <div className="sec-title">É para</div>
+            <div className="alvo">
+              {deptsCarro.length > 0 && (
+                <button className={f.alvo === 'car' ? 'on' : ''} aria-pressed={f.alvo === 'car'} onClick={() => paraCarro()}>
+                  <small>Um carro</small><strong>{f.alvo === 'car' && (f.carLabel || f.plate) ? (f.carLabel || f.plate) : 'Escolher'}</strong>
+                </button>
+              )}
+              <button className={f.alvo === 'shop' ? 'on' : ''} aria-pressed={f.alvo === 'shop'} onClick={paraOficina}>
+                <small>A oficina</small><strong>No geral</strong>
+              </button>
             </div>
-            {f.isTransversal && <div className="lanc-nature">Custo de todos os departamentos (ex.: contabilista). A divisão por percentagens entra no painel.</div>}
-          </>
-        )}
 
-        {temCarro && (
-          <div className="lanc-carro">
-            <div className="lanc-carro-title"><i className="ti ti-car" aria-hidden="true"></i> Carro {f.jobOrderId ? '' : '(opcional)'}</div>
-            {f.jobOrderId ? (
-              <div className="lanc-car-sel">
-                <span>{f.carLabel || 'Carro escolhido'}</span>
-                <button className="btn-ghost btn-sm" onClick={() => setF({ ...f, jobOrderId: '', carLabel: '', plate: '', make: '', model: '' })}>trocar</button>
+            {temCarro && deptsCarro.length > 1 && (
+              <div className="chips" style={{ marginTop: 10 }} role="group" aria-label="Departamento">
+                {deptsCarro.map((d: any) => (
+                  <button key={d.id} className={`chip ${f.departmentId === d.id ? 'on' : ''}`} aria-pressed={f.departmentId === d.id} onClick={() => setF({ ...f, departmentId: d.id, isTransversal: false })}>{d.name}</button>
+                ))}
               </div>
-            ) : manual ? (
-              <>
-                <div className="lanc-row2">
-                  <div><label className="fl">Matrícula</label><input value={f.plate} onChange={e => setF({ ...f, plate: e.target.value })} placeholder="ABC-123-MC" /></div>
-                  <div><label className="fl">Motor</label><input value={f.engine} onChange={e => setF({ ...f, engine: e.target.value })} placeholder="2.0 Turbo" /></div>
-                </div>
-                <div className="lanc-row2" style={{ marginTop: 8 }}>
-                  <div><label className="fl">Marca</label><input value={f.make} onChange={e => setF({ ...f, make: e.target.value })} placeholder="BMW" /></div>
-                  <div><label className="fl">Modelo</label><input value={f.model} onChange={e => setF({ ...f, model: e.target.value })} placeholder="120i" /></div>
-                </div>
-                <button className="lanc-link" onClick={() => { setManual(false); setF({ ...f, plate: '', make: '', model: '', engine: '' }) }}>Escolher um carro da oficina</button>
-              </>
-            ) : (
-              <>
-                <input value={carQ} onChange={e => setCarQ(e.target.value)} placeholder="procurar matrícula, nº ou cliente" />
-                <div className="lanc-car-list">
-                  {cars.length === 0 && <div className="lanc-nature">Nenhum carro encontrado.</div>}
-                  {cars.map((c: any) => (
-                    <button key={c.id} onClick={() => setF({ ...f, jobOrderId: c.id, carLabel: rotuloCarro(c), plate: c.plate || '', make: c.brand || '', model: c.model || '' })}>
-                      <strong>{c.plate || c.number}</strong>
-                      <span>{[c.number, [c.brand, c.model].filter(Boolean).join(' '), c.customer].filter(Boolean).join(' · ')}{c.status === 'delivered' ? ' · entregue' : ''}</span>
-                    </button>
-                  ))}
-                </div>
-                <button className="lanc-link" onClick={() => setManual(true)}>Carro que não está no sistema</button>
-              </>
+            )}
+            {f.alvo === 'shop' && dono && (
+              <div className="chips" style={{ marginTop: 10 }}>
+                {depts.map((d: any) => (
+                  <button key={d.id} className={`chip ${!f.isTransversal && f.departmentId === d.id ? 'on' : ''}`} aria-pressed={!f.isTransversal && f.departmentId === d.id}
+                    onClick={() => setF({ ...f, departmentId: d.id, isTransversal: false })}>{d.name}</button>
+                ))}
+                <button className={`chip ${f.isTransversal ? 'on' : ''}`} aria-pressed={f.isTransversal} onClick={() => setF({ ...f, isTransversal: true, departmentId: '' })}>Toda a oficina</button>
+              </div>
+            )}
+
+            {temCarro && (
+              <div className="lanc-carro">
+                {f.jobOrderId ? (
+                  <div className="lanc-car-sel">
+                    <span>{f.carLabel || 'Carro escolhido'}</span>
+                    <button className="btn-ghost btn-sm" onClick={() => setF({ ...f, jobOrderId: '', carLabel: '', plate: '', make: '', model: '' })}>Trocar</button>
+                  </div>
+                ) : manual ? (
+                  <>
+                    <div className="lanc-row2">
+                      <div><label className="fl">Matrícula</label><input value={f.plate} onChange={e => setF({ ...f, plate: e.target.value })} placeholder="ABC-123-MC" /></div>
+                      <div><label className="fl">Motor</label><input value={f.engine} onChange={e => setF({ ...f, engine: e.target.value })} placeholder="2.0 Turbo" /></div>
+                    </div>
+                    <div className="lanc-row2" style={{ marginTop: 8 }}>
+                      <div><label className="fl">Marca</label><input value={f.make} onChange={e => setF({ ...f, make: e.target.value })} placeholder="BMW" /></div>
+                      <div><label className="fl">Modelo</label><input value={f.model} onChange={e => setF({ ...f, model: e.target.value })} placeholder="120i" /></div>
+                    </div>
+                    <button className="lanc-link" onClick={() => { setManual(false); setF({ ...f, plate: '', make: '', model: '', engine: '' }) }}>Escolher um carro da oficina</button>
+                  </>
+                ) : (
+                  <>
+                    <input value={carQ} onChange={e => setCarQ(e.target.value)} aria-label="Procurar carro" placeholder="Procurar matrícula, nº ou cliente" />
+                    <div className="lanc-car-list">
+                      {cars.length === 0 && <div className="lanc-nature">Nenhum carro encontrado.</div>}
+                      {cars.map((c: any) => (
+                        <button key={c.id} onClick={() => setF({ ...f, jobOrderId: c.id, carLabel: rotuloCarro(c), plate: c.plate || '', make: c.brand || '', model: c.model || '' })}>
+                          <strong>{c.plate || c.number}</strong>
+                          <span>{[[c.brand, c.model].filter(Boolean).join(' '), c.customer, c.number].filter(Boolean).join(' · ')}{c.status === 'delivered' ? ' · entregue' : ''}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {dono && <button className="lanc-link" onClick={() => setManual(true)}>Carro que não está no sistema</button>}
+                  </>
+                )}
+              </div>
             )}
           </div>
         )}
 
-        <label className="fl" style={{ marginTop: 10 }}>Pago / recebido por</label>
-        <select value={f.paymentMethod} onChange={e => setF({ ...f, paymentMethod: e.target.value })}>
-          {LANC_METHODS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-        </select>
-        {f.paymentMethod === 'cash' && <div className="lanc-nature">Caixa não aparece no extrato do banco — vai precisar da tua validação.</div>}
+        <div className="lanc-bloco">
+          <label className="sec-title" htmlFor="lanc-desc">O que foi <span className="opt-tag">opcional</span></label>
+          <input id="lanc-desc" value={f.description} onChange={e => setF({ ...f, description: e.target.value })} placeholder="Em poucas palavras" />
+          {!editId && f.flow === 'revenue' && temCarro && (
+            <div className="lanc-nature">Os pagamentos marcados no carro já entram sozinhos — não os lances outra vez aqui.</div>
+          )}
+        </div>
 
-        {!editId && f.flow === 'revenue' && deptSel?.tracks_vehicles && (
-          <div className="lanc-nature">Os pagamentos marcados no carro já entram sozinhos — não os lances outra vez aqui.</div>
+        <button className="lanc-mais" aria-expanded={mais} onClick={() => setMais(!mais)}>
+          <i className={`ti ${mais ? 'ti-chevron-up' : 'ti-chevron-down'}`} aria-hidden="true"></i>
+          {mais ? 'Menos detalhes' : `Mais detalhes · ${new Date(f.entryDate).toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' })} · ${LANC_METHOD_LABEL[f.paymentMethod] || '—'}`}
+        </button>
+        {mais && (
+          <div className="lanc-detalhes">
+            <div className="lanc-row2">
+              <div><label className="fl">Data</label><input type="date" value={f.entryDate} onChange={e => setF({ ...f, entryDate: e.target.value })} /></div>
+              <div>
+                <label className="fl">Pago / recebido por</label>
+                <select value={f.paymentMethod} onChange={e => setF({ ...f, paymentMethod: e.target.value })}>
+                  {LANC_METHODS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                </select>
+              </div>
+            </div>
+            <label className="fl" style={{ marginTop: 10 }}>{f.flow === 'revenue' ? 'Cliente' : f.flow === 'cost' ? 'Fornecedor / a quem' : 'Origem / destino'}</label>
+            <input value={f.counterparty} onChange={e => setF({ ...f, counterparty: e.target.value })} />
+          </div>
         )}
-        <label className="fl" style={{ marginTop: 10 }}>Descrição</label>
-        <input value={f.description} onChange={e => setF({ ...f, description: e.target.value })} placeholder="o que foi, em poucas palavras" />
 
-        <label className="fl" style={{ marginTop: 10 }}>{f.flow === 'revenue' ? 'Cliente' : f.flow === 'cost' ? 'Fornecedor / a quem' : 'Origem / destino'} (opcional)</label>
-        <input value={f.counterparty} onChange={e => setF({ ...f, counterparty: e.target.value })} />
-
-        {editId ? (
+        <input ref={fotoRef} type="file" accept="image/*" capture="environment" hidden
+          onChange={e => { const b = e.target.files?.[0]; if (b) setFoto(b); e.target.value = '' }} />
+        <div className="lanc-acoes">
+          <button className={`btn-factura ${foto || temFactura ? 'tem' : ''}`} onClick={() => fotoRef.current?.click()}>
+            <i className={`ti ${foto || temFactura ? 'ti-check' : 'ti-camera'}`} aria-hidden="true"></i>
+            {foto ? 'Factura pronta' : temFactura ? 'Trocar factura' : 'Factura'}
+          </button>
+          <button className="btn-primary lanc-guardar" disabled={busy} onClick={lancar}>{busy ? 'A guardar…' : editId ? 'Guardar alterações' : 'Guardar'}</button>
+        </div>
+        {editId && (
           <div className="lanc-edit-actions">
-            <button className="btn-primary" disabled={busy} onClick={lancar}>{busy ? 'A guardar…' : 'Guardar alterações'}</button>
+            {temFactura && <button className="btn-ghost" onClick={verFactura}><i className="ti ti-file-invoice" aria-hidden="true"></i> Ver factura</button>}
             <button className="btn-ghost" onClick={cancelarEdicao}>Cancelar</button>
             <button className="btn-ghost lanc-del" onClick={apagar}><i className="ti ti-trash" aria-hidden="true"></i> Apagar</button>
           </div>
-        ) : (
-          <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 16 }} disabled={busy} onClick={lancar}>
-            {busy ? 'A lançar…' : 'Lançar'}
-          </button>
         )}
       </div>
 
-      {recentes.length > 0 && (
+      {todos.length > 0 && (
         <>
-          <div className="det-section-title" style={{ marginTop: 18 }}>Últimos lançamentos <span className="opt-tag">toca para corrigir</span></div>
+          <div className="lanc-lista-head">
+            <h2 className="sec-title">{dono ? 'Lançamentos' : 'Os meus lançamentos'}</h2>
+            {dono && pendentes.length > 0 && (
+              <div className="seg seg-sm">
+                <button className={!soPend ? 'on' : ''} onClick={() => setSoPend(false)}>Todos</button>
+                <button className={soPend ? 'on' : ''} onClick={() => setSoPend(true)}>Por validar · {pendentes.length}</button>
+              </div>
+            )}
+          </div>
           <div className="lanc-recent">
-            {recentes.map((r: any) => (
-              <div key={r.id} className={`lanc-recent-row click ${r.counts_in_result === false ? 'neutral' : ''} ${editId === r.id ? 'editing' : ''}`} onClick={() => carregar(r)}>
-                <div>
-                  <div className="lanc-recent-desc">{r.category_name || r.category || '—'}{r.plate ? ` · ${r.plate}` : ''}</div>
-                  <div className="sub">
+            {lista.map((r: any) => (
+              <div key={r.id} className={`lanc-recent-row ${r.counts_in_result === false ? 'neutral' : ''} ${editId === r.id ? 'editing' : ''}`}>
+                <button className="lanc-recent-main" onClick={() => carregar(r)}>
+                  <span className="lanc-recent-desc">{r.category_name || r.category || '—'}{r.plate ? ` · ${r.plate}` : r.is_transversal ? ' · Oficina' : ''}</span>
+                  <span className="sub">
                     {[r.description,
-                      r.department || (r.is_transversal ? 'Transversal' : null),
-                      r.payment_method ? LANC_METHOD_LABEL[r.payment_method] : null,
+                      dono ? (r.department || (r.is_transversal ? 'Toda a oficina' : null)) : null,
                       r.entry_date ? new Date(r.entry_date).toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' }) : null,
+                      r.has_receipt ? 'com factura' : 'sem factura',
+                      dono && r.created_by && r.created_by !== meuId ? r.created_by_name : null,
                     ].filter(Boolean).join(' · ')}
-                  </div>
-                </div>
-                <div className={`lanc-recent-val ${r.counts_in_result === false ? 'neu' : sinal(r) === 'in' ? 'rev' : 'cost'}`}>
-                  {sinal(r) === 'in' ? '+' : '−'}{fmtMT(Number(r.revenue) > 0 ? r.revenue : r.cost)}
+                  </span>
+                </button>
+                <div className="lanc-recent-fim">
+                  <span className={`lanc-recent-val ${r.counts_in_result === false ? 'neu' : sinal(r) === 'in' ? 'rev' : 'cost'}`}>
+                    {sinal(r) === 'in' ? '+' : '−'}{fmtMT(Number(r.revenue) > 0 ? r.revenue : r.cost)}
+                  </span>
+                  {r.pending_review
+                    ? (dono
+                        ? <button className="btn-validar" onClick={() => validar(r.id)}>Validar</button>
+                        : <span className="pill ph-quote">Por validar</span>)
+                    : (!dono && <span className="pill ph-working">Validado</span>)}
                 </div>
               </div>
             ))}
           </div>
+          {dono && soPend && pendentes.length === 0 && <p className="empty">Nada por validar.</p>}
         </>
       )}
     </main>
@@ -5592,12 +5785,16 @@ function GastosCarro({ joId, onLancar, onEdit }: { joId: string; onLancar: () =>
         : (
           <div className="lanc-recent" style={{ marginTop: 10 }}>
             {gastos.map((e: any) => (
-              <div key={e.id} className="lanc-recent-row click" onClick={() => onEdit(e)}>
-                <div>
-                  <div className="lanc-recent-desc">{e.category_name || '—'}</div>
-                  <div className="sub">{[e.description, e.counterparty, e.entry_date ? new Date(e.entry_date).toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' }) : null].filter(Boolean).join(' · ')}</div>
+              <div key={e.id} className="lanc-recent-row">
+                <button className="lanc-recent-main" onClick={() => onEdit(e)}>
+                  <span className="lanc-recent-desc">{e.category_name || '—'}</span>
+                  <span className="sub">{[e.description, e.counterparty, e.entry_date ? new Date(e.entry_date).toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' }) : null,
+                    e.has_receipt ? 'com factura' : null, e.pending_review ? e.created_by_name : null].filter(Boolean).join(' · ')}</span>
+                </button>
+                <div className="lanc-recent-fim">
+                  <span className="lanc-recent-val cost">−{fmtMT(e.cost)}</span>
+                  {e.pending_review && <span className="pill ph-quote">Por validar</span>}
                 </div>
-                <div className="lanc-recent-val cost">−{fmtMT(e.cost)}</div>
               </div>
             ))}
           </div>
@@ -5767,10 +5964,13 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry, onLancarGasto,
   const [rejecting, setRejecting] = useState(false)
   const [rejectNote, setRejectNote] = useState('')
   const [photoView, setPhotoView] = useState<string | null>(null)
+  const [tab, setTab] = useState<string | null>(null)
+  const [menu, setMenu] = useState(false)
   const [gastosKey, setGastosKey] = useState(0)   // refresca "Gastos deste carro" quando os preços mudam
   const canDo = useSession(s => s.can)
   const podeGerirOS = canDo('os:manage'), podeQC = canDo('qc:approve'), podePagar = canDo('payment:register')
   const podePreco = useSession(s => s.can)('pricing:manage')
+  const podeLancar = canDo('ledger:own')
 
   const [loadError, setLoadError] = useState<string | null>(null)
   const load = () => {
@@ -5812,8 +6012,8 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry, onLancarGasto,
   const errorScreen = (msg: string) => (
     <main className="reception">
       <div className="rec-top" style={{ marginBottom: 16 }}>
-        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Recepções</button>
-        <h2 style={{ margin: 0, fontSize: 18 }}>Ordem de Serviço</h2><span />
+        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Voltar</button>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Carro</h2><span />
       </div>
       <p className="empty">{msg}</p>
       <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 8 }} onClick={load}>
@@ -5823,24 +6023,26 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry, onLancarGasto,
   )
 
   // não iniciada ainda
-  if (loading) return <main className="reception"><p className="empty">A carregar…</p></main>
-  if (loadError) return errorScreen(`Não foi possível carregar: ${loadError}`)
+  // Só mostra «A carregar…» na primeira vez. Depois actualiza por trás, sem
+  // apagar o ecrã (os painéis abertos e o que se está a escrever mantêm-se).
+  if (loading && !data) return <main className="reception"><p className="empty">A carregar…</p></main>
+  if (loadError && !data) return errorScreen(`Não foi possível carregar: ${loadError}`)
   if (!jo) return errorScreen('Não foi possível carregar a Ordem de Serviço.')
 
   if (!jo.os_opened_at) {
     return (
       <main className="reception">
         <div className="rec-top" style={{ marginBottom: 16 }}>
-          <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Recepções</button>
-          <h2 style={{ margin: 0, fontSize: 18 }}>{jo.number}</h2><span />
+          <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Voltar</button>
+          <h2 style={{ margin: 0, fontSize: 18 }}>{jo.plate || jo.number}</h2><span />
         </div>
         <Banner msg={msg} onClose={() => setMsg(null)} />
         <div className="os-start-card">
           <div className="os-start-ic"><i className="ti ti-tools" aria-hidden="true"></i></div>
-          <h2>Iniciar Ordem de Serviço</h2>
+          <h2>Começar o trabalho neste carro</h2>
           <p>Ao iniciar, começa o registo do trabalho neste carro ({jo.brand} {jo.model} · {jo.plate}). As queixas do cliente entram automaticamente na lista de problemas para diagnóstico.</p>
           <button className="btn-primary" style={{ justifyContent: 'center' }} disabled={starting} onClick={startOS}>
-            {starting ? 'A iniciar…' : 'Iniciar OS e começar diagnóstico'}
+            {starting ? 'A iniciar…' : 'Começar o diagnóstico'}
           </button>
         </div>
       </main>
@@ -5958,253 +6160,335 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry, onLancarGasto,
     catch (e: any) { say('err', e?.message || 'Não foi possível recusar.') }
   }
 
+  // ── Ecrã do carro (v106): cabeçalho com a fase, separadores e o
+  //    próximo passo sempre fixo em baixo. A lógica é a mesma — só
+  //    mudou onde cada coisa está.
+  const FASES6 = [
+    { l: 'Entrada', st: ['draft', 'reception'] },
+    { l: 'Diagnóstico', st: ['awaiting_diagnosis', 'in_diagnosis', 'diagnosis_review'] },
+    { l: 'Orçamento', st: ['awaiting_quote', 'quote_sent'] },
+    { l: 'Trabalho', st: ['approved', 'in_progress'] },
+    { l: 'Controlo de qualidade', st: ['quality_check'] },
+    { l: 'Entrega', st: ['ready', 'delivered'] },
+  ]
+  const qcOk = jo.qc_status === 'approved'
+  const faltaQC = jo.status === 'quality_check' || (jo.status === 'ready' && !qcOk)
+  const faseIdx = faltaQC ? 4 : Math.max(0, FASES6.findIndex(x => x.st.includes(jo.status)))
+  const entregue = jo.status === 'delivered'
+  const naEntrega = ['ready', 'quality_check', 'delivered'].includes(jo.status)
+  const abaInicial = faseIdx <= 1 ? 'diag' : naEntrega ? 'entrega' : 'trabalho'
+  const aba = tab || abaInicial
+  const porDecidir = problems.filter((p: any) => p.status !== 'converted' && p.status !== 'dismissed').length
+  const temContas = podePreco || podeLancar
+  const ABAS: [string, string, string?][] = [
+    ['diag', 'Diagnóstico', porDecidir > 0 ? String(porDecidir) : undefined],
+    ['trabalho', 'Trabalho', svcs.length > 0 ? `${svcDone}/${svcs.length}` : undefined],
+    ['entrega', 'Entrega'],
+    ...(temContas ? [['contas', 'Contas'] as [string, string]] : []),
+  ]
+  const iniciarQC = () => {
+    const run = async () => {
+      try { await api(`/api/v1/os/${jo.id}/start-qc`, { method: 'POST' }); await load(); setTab('entrega'); say('ok', 'Controlo de qualidade iniciado.') }
+      catch (e: any) { say('err', e?.message || 'Não foi possível iniciar o QC.') }
+    }
+    if (todosProntos) return run()
+    setAsk({ text: `Este carro está em "${STATUS_LABEL[jo.status] || jo.status}". Iniciar o controlo de qualidade de saída na mesma?`,
+      detail: svcs.length > svcDone ? `Ainda há ${svcs.length - svcDone} ${svcs.length - svcDone === 1 ? 'serviço por concluir' : 'serviços por concluir'}.` : undefined,
+      yes: 'Iniciar QC', run })
+  }
+  const finalizar = () => setAsk({
+    text: `Marcar ${jo.number} como finalizada/entregue?`,
+    detail: 'Atalho para fechar carros já tratados. Ignora o controlo de qualidade — usar só em testes.',
+    yes: 'Finalizar', danger: true,
+    run: async () => {
+      try { await api(`/api/v1/receptions/${joId}/status`, { method: 'POST', body: JSON.stringify({ status: 'delivered', force: true }) }); load() }
+      catch (e: any) { say('err', e?.message || 'Não foi possível finalizar.') }
+    },
+  })
+
+  // O PRÓXIMO PASSO — uma frase e, se for a vez de quem está a ver, um botão.
+  let passo: { txt: string; btn?: string; run?: () => void; fraco?: boolean } | null = null
+  if (isDiag) passo = problems.length === 0
+    ? { txt: 'Regista os problemas encontrados no carro.', btn: aba === 'diag' ? undefined : 'Ir ao diagnóstico', run: () => setTab('diag') }
+    : { txt: `${problems.length} ${problems.length === 1 ? 'problema registado' : 'problemas registados'}. Quando estiver completo, submete.`, btn: authOn ? 'Submeter diagnóstico' : 'Concluir diagnóstico', run: submitDiagnosis }
+  else if (isReview) passo = iSubmitted
+    ? { txt: 'Submetido. À espera de autorização.', btn: 'Retirar submissão', run: withdrawDiagnosis, fraco: true }
+    : { txt: `Diagnóstico de ${jo.diag_submitted_by_name || 'um colega'} à espera da tua autorização.`, btn: aba === 'diag' ? undefined : 'Rever e autorizar', run: () => setTab('diag') }
+  else if (jo.status === 'awaiting_quote') passo = podePreco
+    ? { txt: 'Falta dar preço aos serviços.', btn: aba === 'trabalho' ? undefined : 'Dar preço', run: () => setTab('trabalho') }
+    : { txt: 'À espera do preço da gestão.' }
+  else if (jo.status === 'quote_sent') passo = { txt: 'À espera da resposta do cliente ao orçamento.' }
+  else if (['approved', 'in_progress'].includes(jo.status)) passo = {
+    txt: svcs.length === 0 ? 'Ainda não há serviços neste carro.' : todosProntos ? 'Todos os serviços estão feitos.' : `${svcDone} de ${svcs.length} serviços feitos${svcWaiting > 0 ? ` · ${svcWaiting} à espera` : ''}.`,
+    ...(podeQC ? { btn: 'Iniciar QC de saída', run: iniciarQC, fraco: !todosProntos } : {}) }
+  else if (['quality_check', 'ready'].includes(jo.status)) passo = {
+    txt: faltaQC ? (podeQC ? 'Falta o controlo de qualidade de saída. Nada sai sem QC.' : 'No controlo de qualidade, a cargo da gestão.')
+      : jo.payment_status === 'paid' ? 'QC aprovado e pago. Pronto a entregar ao cliente.' : 'QC aprovado. Falta registar o pagamento.',
+    btn: aba === 'entrega' ? undefined : 'Ir à entrega', run: () => setTab('entrega') }
+
   return (
-    <main className="reception">
+    <main className="carro">
       {photoView && (
         <div className="photo-viewer" onClick={() => setPhotoView(null)}>
           <img src={photoView} alt="evidência" />
-          <button className="photo-viewer-close"><i className="ti ti-x" aria-hidden="true"></i></button>
+          <button className="photo-viewer-close" aria-label="Fechar"><i className="ti ti-x" aria-hidden="true"></i></button>
         </div>
       )}
-
-      <div className="rec-top" style={{ marginBottom: 16 }}>
-        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Recepções</button>
-        <h2 style={{ margin: 0, fontSize: 18 }}>OS {jo.number}</h2><span />
-      </div>
-      {onOpenEntry && (
-        <button className="det-link" style={{ marginBottom: 12 }} onClick={() => onOpenEntry(joId)}>
-          <i className="ti ti-file-description" aria-hidden="true"></i>
-          <span>Ver o que foi registado à entrada</span>
-          <i className="ti ti-chevron-right" aria-hidden="true"></i>
-        </button>
-      )}
-      <Banner msg={msg} onClose={() => setMsg(null)} />
       <ConfirmBox ask={ask} onNo={() => setAsk(null)} onYes={(reason?: string) => { const r = ask?.run; setAsk(null); r?.(reason) }} />
 
-      <WorkflowGuide status={jo.status} />
-
-      <div className="os-status-bar">
-        <span className="os-veh">{jo.brand} {jo.model} · {jo.plate}</span>
-        <span className={`os-badge st-${jo.status}`}>
-          {jo.status === 'in_diagnosis' ? 'Em diagnóstico' : jo.status === 'diagnosis_review' ? 'Aguarda autorização' : jo.status === 'awaiting_quote' ? 'Diagnóstico concluído' : jo.status}
-        </span>
-      </div>
-
-      {svcs.length > 0 && (
-        <div className="os-progress">
-          <div className="os-progress-bar">
-            <div className="os-progress-fill" style={{ width: `${Math.round((svcDone / svcs.length) * 100)}%` }} />
-          </div>
-          <div className="os-progress-txt">
-            <strong>{svcDone} de {svcs.length}</strong> {svcs.length === 1 ? 'serviço concluído' : 'serviços concluídos'}
-            {svcWaiting > 0 && <span className="os-progress-wait"> · {svcWaiting} à espera</span>}
-          </div>
-        </div>
-      )}
-
-      {todosProntos && !jaMarcadoPronto && podeQC && (
-        <div className="os-ready-hint">
-          <div><i className="ti ti-circle-check" aria-hidden="true"></i> Todos os serviços estão concluídos. O carro pode estar pronto para entrega.</div>
-          <button className="btn-primary btn-sm" onClick={async () => {
-            try { await api(`/api/v1/os/${jo.id}/mark-ready`, { method: 'POST' }); load(); say('ok', 'Carro marcado como pronto.') }
-            catch (e: any) { say('err', e?.message || 'Não foi possível marcar como pronto.') }
-          }}>Marcar como pronto</button>
-        </div>
-      )}
-
-      <div className="os-responsible">
-        <i className="ti ti-user-star" aria-hidden="true"></i>
-        <span className="os-resp-label">Responsável:</span>
-        <select value={jo.responsible_id || ''} disabled={!podeGerirOS} onChange={async e => {
-          try { await api(`/api/v1/os/${jo.id}/responsible`, { method: 'POST', body: JSON.stringify({ userId: e.target.value || null }) }); load() }
-          catch { say('err', 'Não foi possível definir o responsável.') }
-        }}>
-          <option value="">— ninguém —</option>
-          {(data?.team || []).map((m: any) => <option key={m.id} value={m.id}>{m.full_name}</option>)}
-        </select>
-      </div>
-
-      {podeQC && !['ready', 'quality_check', 'delivered', 'cancelled', 'draft', 'reception'].includes(jo.status) && (
-        <div className="start-qc-box">
-          <div className="start-qc-txt">
-            <i className="ti ti-shield-check" aria-hidden="true"></i>
-            <span>Quando o trabalho estiver feito, faz o controlo de qualidade de saída. Podes iniciá-lo já, mesmo que o carro ainda não tenha chegado aqui pelo fluxo normal.</span>
-          </div>
-          <button className="btn-primary btn-sm" onClick={() => setAsk({
-            text: `Este carro está em "${STATUS_LABEL[jo.status] || jo.status}". Iniciar o controlo de qualidade de saída na mesma?`,
-            yes: 'Iniciar QC',
-            run: async () => {
-              try { await api(`/api/v1/os/${jo.id}/start-qc`, { method: 'POST' }); await load(); say('ok', 'Controlo de qualidade iniciado.') }
-              catch (e: any) { say('err', e?.message || 'Não foi possível iniciar o QC.') }
-            },
-          })}>
-            <i className="ti ti-shield-check" aria-hidden="true"></i> Iniciar QC de saída
-          </button>
-        </div>
-      )}
-
-      {['ready', 'quality_check'].includes(jo.status) && (podeQC
-        ? <QCPanel joId={jo.id} say={say} onDelivered={load} />
-        : <div className="banner i" style={{ marginTop: 14 }}>Este carro está no controlo de qualidade, a cargo da gestão.</div>
-      )}
-
-      {podePagar && ['ready', 'quality_check', 'delivered'].includes(jo.status) && (
-        <PaymentPanel joId={jo.id} say={say} isOwner={isOwner} onChanged={load} />
-      )}
-
-      {jo.diag_rejected_note && isDiag && (
-        <div className="os-reject-note"><i className="ti ti-alert-triangle" aria-hidden="true"></i> Diagnóstico devolvido: {jo.diag_rejected_note}</div>
-      )}
-
-      <div className="det-section-title diag-list-title" style={{ marginTop: 18 }}><span className="diag-num">2</span> Serviços a fazer</div>
-      <div className="svc-list">
-        {(data?.services || []).length === 0 && <p className="hint">Ainda não há serviços. Acrescenta o que é preciso fazer (ex.: DPF delete, revisão, remap).</p>}
-        {(data?.services || []).map((s: any) => (
-          <ServiceRow key={s.id} svc={s} onChanged={() => { load(); loadBudget() }} say={say} team={data?.team || []} responsibleId={jo.responsible_id} onDelete={!podeGerirOS ? undefined : async () => { try { await api(`/api/v1/os/services/${s.id}`, { method: 'DELETE' }); load(); loadBudget() } catch (e: any) { say('err', e?.message || 'Não removeu.') } }} />
-        ))}
-      </div>
-      {podeGerirOS && <AddService joId={joId} serviceTypes={data?.serviceTypes || []} onAdded={() => { load(); loadBudget() }} say={say} />}
-
-      <div className="det-section-title diag-list-title" style={{ marginTop: 18 }}><span className="diag-num">3</span> Peças a comprar</div>
-      <PartsToBuy services={data?.services || []} />
-
-
-      {podePreco && onLancarGasto && (
-        <GastosCarro key={gastosKey} joId={joId} onLancar={() => onLancarGasto({ id: jo.id, number: jo.number, plate: jo.plate, brand: jo.brand, model: jo.model })}
-          onEdit={(e: any) => onEditGasto?.(e)} />
-      )}
-
-      <div className="diag-lists-intro">
-        <i className="ti ti-list-check" aria-hidden="true"></i>
-        <span>O diagnóstico organiza-se em três: <strong>problemas encontrados</strong>, <strong>serviços a fazer</strong> e <strong>peças a comprar</strong>. Os serviços e as peças formam o orçamento.</span>
-      </div>
-
-      <div className="det-section-title diag-list-title" style={{ marginTop: 14 }}><span className="diag-num">1</span> Problemas encontrados</div>
-      <div className="prob-list">
-        {problems.map((p: any) => (
-          <div key={p.id} className="prob-card">
-            <div className="prob-head">
-              <span className={`prob-origin o-${p.origin}`}>{p.origin === 'customer' ? 'Cliente' : 'Equipa'}</span>
-              <span className="prob-desc">{p.description}</span>
-              {isDiag && <button className="prob-x" onClick={() => deleteProblem(p.id)}><i className="ti ti-x" aria-hidden="true"></i></button>}
-            </div>
-            {isDiag ? (
-              <textarea className="prob-diag" placeholder="Diagnóstico: o que se concluiu…" defaultValue={p.diagnosis || ''}
-                onBlur={e => { if (e.target.value !== (p.diagnosis || '')) updateProblem(p.id, { diagnosis: e.target.value }) }} rows={2} />
-            ) : p.diagnosis ? <div className="prob-diag-view">{p.diagnosis}</div> : <div className="prob-diag-empty">Sem diagnóstico registado</div>}
-            <div className="prob-photos">
-              {(p.photos || []).map((ph: any) => ph.url && (
-                <div key={ph.id} className="prob-photo" onClick={() => setPhotoView(ph.url)}><img src={ph.url} alt="evidência" /></div>
-              ))}
-              {isDiag && <button className="prob-add-photo" onClick={() => addPhoto(p.id)}><i className="ti ti-camera" aria-hidden="true"></i></button>}
-            </div>
-
-            {/* Decisão: o que fazer com este achado */}
-            {p.status === 'converted' ? (
-              <div className="prob-decided ok"><i className="ti ti-arrow-right" aria-hidden="true"></i> Virou serviço: {p.service_name}</div>
-            ) : p.status === 'dismissed' ? (
-              <div className="prob-decided no">
-                <div><i className="ti ti-ban" aria-hidden="true"></i> Dispensado: {p.dismiss_reason}</div>
-                <button className="prob-undo" onClick={() => reopenProblem(p.id)}>Reabrir</button>
-              </div>
-            ) : !podeGerirOS ? null : (
-              <div className="prob-decide">
-                <button className="btn-primary btn-sm" onClick={() => toService(p)}>
-                  <i className="ti ti-tool" aria-hidden="true"></i> Transformar em serviço
-                </button>
-                <button className="btn-ghost btn-sm" onClick={() => dismissProblem(p.id)}>
-                  <i className="ti ti-ban" aria-hidden="true"></i> Não fazer
-                </button>
+      <header className="carro-head">
+        <div className="carro-head-top">
+          <button className="carro-ic" onClick={onBack} aria-label="Voltar"><i className="ti ti-arrow-left" aria-hidden="true"></i></button>
+          <span className="carro-estado">{jo.status === 'ready' && faltaQC ? 'Falta o QC' : (STATUS_LABEL[jo.status] || jo.status)}</span>
+          <div style={{ position: 'relative' }}>
+            <button className="carro-ic" aria-label="Mais opções" aria-expanded={menu} onClick={() => setMenu(!menu)}><i className="ti ti-dots-vertical" aria-hidden="true"></i></button>
+            {menu && <div className="pop-scrim" onClick={() => setMenu(false)} />}
+            {menu && (
+              <div className="pop-menu" role="menu">
+                {onOpenEntry && <button role="menuitem" onClick={() => { setMenu(false); onOpenEntry(joId) }}><i className="ti ti-file-text" aria-hidden="true"></i> Ver ficha de entrada</button>}
+                {isOwner && !entregue && <button role="menuitem" onClick={() => { setMenu(false); finalizar() }}><i className="ti ti-checkbox" aria-hidden="true"></i> Marcar como finalizada</button>}
               </div>
             )}
           </div>
+        </div>
+        <h1>{jo.plate || jo.number}</h1>
+        <p>{[[jo.brand, jo.model].filter(Boolean).join(' '), jo.customer_name, jo.number].filter(Boolean).join(' · ')}</p>
+        <div className="carro-prog" role="img" aria-label={`Passo ${faseIdx + 1} de 6: ${FASES6[faseIdx].l}`}>
+          {FASES6.map((x, i) => <span key={x.l} className={entregue || i < faseIdx ? 'feito' : i === faseIdx ? 'agora' : ''} />)}
+        </div>
+        <div className="carro-prog-txt">
+          <span>{entregue ? 'Entregue' : `Passo ${faseIdx + 1} de 6 · ${FASES6[faseIdx].l}`}</span>
+          {!entregue && faseIdx < 5 && <span>A seguir: {FASES6[faseIdx + 1].l}</span>}
+        </div>
+      </header>
+
+      <div className="carro-tabs" role="tablist">
+        {ABAS.map(([k, l, n]) => (
+          <button key={k} role="tab" aria-selected={aba === k} className={aba === k ? 'on' : ''} onClick={() => setTab(k)}>
+            {l}{n && <span className="tab-n">{n}</span>}
+          </button>
         ))}
-        {problems.length === 0 && <p className="empty">Sem problemas na lista.</p>}
       </div>
 
-      {isDiag && (
-        <>
-          <div className="prob-add">
-            <input value={newProblem} onChange={e => setNewProblem(e.target.value)} placeholder="Acrescentar problema detectado pela equipa…"
-              disabled={acting}
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addProblem() } }} />
-            <button className="btn-primary" onClick={addProblem} disabled={acting || newProblem.trim().length < 2}>
-              {acting ? <i className="ti ti-loader-2 spin" aria-hidden="true"></i> : <i className="ti ti-plus" aria-hidden="true"></i>}
-            </button>
+      <div className="carro-body">
+        <Banner msg={msg} onClose={() => setMsg(null)} />
+
+        {/* ── DIAGNÓSTICO ─────────────────────────────────── */}
+        {aba === 'diag' && (
+          <>
+            {jo.diag_rejected_note && isDiag && (
+              <div className="os-reject-note"><i className="ti ti-alert-triangle" aria-hidden="true"></i> Diagnóstico devolvido: {jo.diag_rejected_note}</div>
+            )}
+            <h2 className="sec-title">Problemas encontrados</h2>
+            <div className="prob-list">
+              {problems.map((p: any) => (
+                <div key={p.id} className="prob-card">
+                  <div className="prob-head">
+                    <span className={`prob-origin o-${p.origin}`}>{p.origin === 'customer' ? 'Cliente' : 'Equipa'}</span>
+                    <span className="prob-desc">{p.description}</span>
+                    {isDiag && <button className="prob-x" aria-label="Apagar problema" onClick={() => deleteProblem(p.id)}><i className="ti ti-x" aria-hidden="true"></i></button>}
+                  </div>
+                  {isDiag ? (
+                    <textarea className="prob-diag" placeholder="Diagnóstico: o que se concluiu…" defaultValue={p.diagnosis || ''}
+                      onBlur={e => { if (e.target.value !== (p.diagnosis || '')) updateProblem(p.id, { diagnosis: e.target.value }) }} rows={2} />
+                  ) : p.diagnosis ? <div className="prob-diag-view">{p.diagnosis}</div> : <div className="prob-diag-empty">Sem diagnóstico registado</div>}
+                  <div className="prob-photos">
+                    {(p.photos || []).map((ph: any) => ph.url && (
+                      <div key={ph.id} className="prob-photo" onClick={() => setPhotoView(ph.url)}><img src={ph.url} alt="evidência" /></div>
+                    ))}
+                    {isDiag && <button className="prob-add-photo" aria-label="Juntar fotografia" onClick={() => addPhoto(p.id)}><i className="ti ti-camera" aria-hidden="true"></i></button>}
+                  </div>
+
+                  {/* Decisão: o que fazer com este achado */}
+                  {p.status === 'converted' ? (
+                    <div className="prob-decided ok"><i className="ti ti-arrow-right" aria-hidden="true"></i> Virou serviço: {p.service_name}</div>
+                  ) : p.status === 'dismissed' ? (
+                    <div className="prob-decided no">
+                      <div><i className="ti ti-ban" aria-hidden="true"></i> Dispensado: {p.dismiss_reason}</div>
+                      <button className="prob-undo" onClick={() => reopenProblem(p.id)}>Reabrir</button>
+                    </div>
+                  ) : !podeGerirOS ? null : (
+                    <div className="prob-decide">
+                      <button className="btn-ghost btn-sm" onClick={() => dismissProblem(p.id)}>Não fazer</button>
+                      <button className="btn-primary btn-sm" onClick={() => toService(p)}>
+                        <i className="ti ti-tool" aria-hidden="true"></i> Passar a serviço
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {problems.length === 0 && <p className="empty">Sem problemas na lista.</p>}
+            </div>
+
+            {isDiag && (
+              <>
+                <div className="prob-add">
+                  <input value={newProblem} onChange={e => setNewProblem(e.target.value)} placeholder="Acrescentar problema detectado pela equipa…" aria-label="Novo problema"
+                    disabled={acting}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addProblem() } }} />
+                  <button className="btn-primary" aria-label="Acrescentar problema" onClick={addProblem} disabled={acting || newProblem.trim().length < 2}>
+                    {acting ? <i className="ti ti-loader-2 spin" aria-hidden="true"></i> : <i className="ti ti-plus" aria-hidden="true"></i>}
+                  </button>
+                </div>
+                <label className="fl" style={{ marginTop: 16 }}>Notas gerais do diagnóstico (opcional)</label>
+                <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Observações gerais…" />
+              </>
+            )}
+
+            {isReview && (
+              <div className="os-review-box">
+                <div className="os-review-head"><i className="ti ti-clipboard-check" aria-hidden="true"></i> Diagnóstico aguarda autorização</div>
+                <p className="det-notes">Submetido por {jo.diag_submitted_by_name}. {authOn && 'A autorização assume a responsabilidade técnica partilhada pelo diagnóstico.'}</p>
+                {iSubmitted ? (
+                  <p className="det-empty">Não podes autorizar o teu próprio diagnóstico. Se te enganaste, podes retirar a submissão enquanto ninguém a autorizar.</p>
+                ) : !showAuth && !rejecting ? (
+                  <div className="rec-nav">
+                    <button className="btn-ghost danger" onClick={() => setRejecting(true)}>Recusar</button>
+                    <button className="btn-primary" onClick={() => setShowAuth(true)}>Autorizar</button>
+                  </div>
+                ) : rejecting ? (
+                  <div style={{ marginTop: 12 }}>
+                    <label className="fl">Motivo da recusa <span className="req">*</span></label>
+                    <input value={rejectNote} onChange={e => setRejectNote(e.target.value)} placeholder="ex: faltou verificar o turbo" />
+                    <div className="rec-nav">
+                      <button className="btn-ghost" onClick={() => setRejecting(false)}>Voltar</button>
+                      <button className="btn-primary" disabled={!rejectNote.trim()} onClick={reject}>Devolver ao diagnóstico</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ marginTop: 12 }}>
+                    <div className="os-auth-notice">
+                      Ao autorizar, assumo a responsabilidade técnica partilhada por este diagnóstico, nos termos das minhas funções. Fica registado que foi você, com a data e a hora.
+                    </div>
+                    <div className="rec-nav" style={{ marginTop: 14 }}>
+                      <button className="btn-ghost" onClick={() => setShowAuth(false)}>Voltar</button>
+                      <button className="btn-primary" onClick={authorize}>Autorizar diagnóstico</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {faseIdx >= 2 && (
+              <div className="os-done-box">
+                <i className="ti ti-circle-check-filled" aria-hidden="true"></i>
+                <div><strong>Diagnóstico concluído.</strong>{jo.diag_authorized_by_name ? <p>Autorizado por {jo.diag_authorized_by_name}.</p> : null}</div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── TRABALHO ────────────────────────────────────── */}
+        {aba === 'trabalho' && (
+          <>
+            {svcs.length > 0 && (
+              <div className="os-progress">
+                <div className="os-progress-bar">
+                  <div className="os-progress-fill" style={{ width: `${Math.round((svcDone / svcs.length) * 100)}%` }} />
+                </div>
+                <div className="os-progress-txt">
+                  <strong>{svcDone} de {svcs.length}</strong> {svcs.length === 1 ? 'serviço concluído' : 'serviços concluídos'}
+                  {svcWaiting > 0 && <span className="os-progress-wait"> · {svcWaiting} à espera</span>}
+                </div>
+              </div>
+            )}
+            <div className="os-responsible">
+              <i className="ti ti-user-star" aria-hidden="true"></i>
+              <label className="os-resp-label" htmlFor="os-resp">Responsável:</label>
+              <select id="os-resp" value={jo.responsible_id || ''} disabled={!podeGerirOS} onChange={async e => {
+                try { await api(`/api/v1/os/${jo.id}/responsible`, { method: 'POST', body: JSON.stringify({ userId: e.target.value || null }) }); load() }
+                catch { say('err', 'Não foi possível definir o responsável.') }
+              }}>
+                <option value="">— ninguém —</option>
+                {(data?.team || []).map((m: any) => <option key={m.id} value={m.id}>{m.full_name}</option>)}
+              </select>
+            </div>
+
+            <h2 className="sec-title" style={{ marginTop: 18 }}>Serviços a fazer</h2>
+            <div className="svc-list">
+              {(data?.services || []).length === 0 && <p className="hint">Ainda não há serviços. {podeGerirOS ? 'Acrescenta o que é preciso fazer (ex.: DPF delete, revisão, remap) ou passa um problema a serviço no Diagnóstico.' : ''}</p>}
+              {(data?.services || []).map((s: any) => (
+                <ServiceRow key={s.id} svc={s} onChanged={() => { load(); loadBudget() }} say={say} team={data?.team || []} responsibleId={jo.responsible_id} onDelete={!podeGerirOS ? undefined : async () => { try { await api(`/api/v1/os/services/${s.id}`, { method: 'DELETE' }); load(); loadBudget() } catch (e: any) { say('err', e?.message || 'Não removeu.') } }} />
+              ))}
+            </div>
+            {podeGerirOS && <AddService joId={joId} serviceTypes={data?.serviceTypes || []} onAdded={() => { load(); loadBudget() }} say={say} />}
+
+            <h2 className="sec-title" style={{ marginTop: 22 }}>Peças a comprar</h2>
+            <PartsToBuy services={data?.services || []} />
+          </>
+        )}
+
+        {/* ── ENTREGA ─────────────────────────────────────── */}
+        {aba === 'entrega' && (
+          <>
+            {entregue && <div className="os-done-box"><i className="ti ti-flag-check" aria-hidden="true"></i><div><strong>Finalizada / entregue.</strong></div></div>}
+            {!naEntrega && (
+              <div className="start-qc-box">
+                <div className="start-qc-txt">
+                  <i className="ti ti-shield-check" aria-hidden="true"></i>
+                  <span>Este carro ainda não está no controlo de qualidade. {podeQC ? 'Quando o trabalho estiver feito, inicia o QC de saída — podes fazê-lo em qualquer fase. Nada sai sem QC.' : 'O QC de saída e a entrega são feitos pela gestão.'}</span>
+                </div>
+                {podeQC && !['cancelled', 'draft', 'reception'].includes(jo.status) && (
+                  <button className="btn-primary btn-sm" onClick={iniciarQC}><i className="ti ti-shield-check" aria-hidden="true"></i> Iniciar QC de saída</button>
+                )}
+              </div>
+            )}
+            {['ready', 'quality_check'].includes(jo.status) && (podeQC
+              ? <QCPanel joId={jo.id} say={say} onDelivered={load} onChanged={load} />
+              : <div className="banner i" style={{ marginTop: 14 }}>Este carro está no controlo de qualidade, a cargo da gestão.</div>
+            )}
+            {podePagar && naEntrega && <PaymentPanel joId={jo.id} say={say} isOwner={isOwner} onChanged={load} />}
+          </>
+        )}
+
+        {/* ── CONTAS ──────────────────────────────────────── */}
+        {aba === 'contas' && temContas && onLancarGasto && (
+          podePreco
+            ? <GastosCarro key={gastosKey} joId={joId} onLancar={() => onLancarGasto({ id: jo.id, number: jo.number, plate: jo.plate, brand: jo.brand, model: jo.model })}
+                onEdit={(e: any) => onEditGasto?.(e)} />
+            : <MeusGastosCarro joId={joId} onLancar={() => onLancarGasto({ id: jo.id, number: jo.number, plate: jo.plate, brand: jo.brand, model: jo.model })}
+                onEdit={(e: any) => onEditGasto?.(e)} />
+        )}
+      </div>
+
+      {passo && (
+        <div className="next-bar">
+          <div className="next-bar-in">
+            <div className="next-txt"><small>Próximo passo</small>{passo.txt}</div>
+            {passo.btn && <button className={passo.fraco ? 'btn-next fraco' : 'btn-next'} disabled={acting} onClick={passo.run}>{passo.btn}</button>}
           </div>
-          <label className="fl" style={{ marginTop: 16 }}>Notas gerais do diagnóstico (opcional)</label>
-          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Observações gerais…" />
-          <button className="btn-primary submit-diag" onClick={submitDiagnosis} disabled={acting || problems.length === 0}>
-            {acting ? 'A submeter…' : authOn ? 'Submeter diagnóstico para autorização' : 'Concluir diagnóstico'}
-          </button>
-        </>
-      )}
-
-      {isReview && (
-        <div className="os-review-box">
-          <div className="os-review-head"><i className="ti ti-clipboard-check" aria-hidden="true"></i> Diagnóstico aguarda autorização</div>
-          <p className="det-notes">Submetido por {jo.diag_submitted_by_name}. {authOn && 'A autorização assume a responsabilidade técnica partilhada pelo diagnóstico.'}</p>
-          {iSubmitted ? (
-            <>
-              <p className="det-empty">Não podes autorizar o teu próprio diagnóstico. Aguarda a autorização do responsável.</p>
-              <p className="det-notes" style={{ marginTop: 8 }}>Enganaste-te ou falta corrigir alguma coisa? Podes retirar a submissão enquanto ninguém a autorizar.</p>
-              <button className="btn-ghost" style={{ marginTop: 8 }} onClick={withdrawDiagnosis} disabled={acting}>
-                <i className="ti ti-arrow-back-up" aria-hidden="true"></i> {acting ? 'A retirar…' : 'Retirar submissão'}
-              </button>
-            </>
-          ) : !showAuth && !rejecting ? (
-            <div className="rec-nav">
-              <button className="btn-ghost danger" onClick={() => setRejecting(true)}>Recusar</button>
-              <button className="btn-primary" onClick={() => setShowAuth(true)}>Autorizar</button>
-            </div>
-          ) : rejecting ? (
-            <div style={{ marginTop: 12 }}>
-              <label className="fl">Motivo da recusa <span className="req">*</span></label>
-              <input value={rejectNote} onChange={e => setRejectNote(e.target.value)} placeholder="ex: faltou verificar o turbo" />
-              <div className="rec-nav">
-                <button className="btn-ghost" onClick={() => setRejecting(false)}>Voltar</button>
-                <button className="btn-primary" disabled={!rejectNote.trim()} onClick={reject}>Devolver ao diagnóstico</button>
-              </div>
-            </div>
-          ) : (
-            <div style={{ marginTop: 12 }}>
-              <div className="os-auth-notice">
-                Ao autorizar, assumo a responsabilidade técnica partilhada por este diagnóstico, nos termos das minhas funções. Fica registado que foi você, com a data e a hora.
-              </div>
-              <div className="rec-nav" style={{ marginTop: 14 }}>
-                <button className="btn-ghost" onClick={() => setShowAuth(false)}>Voltar</button>
-                <button className="btn-primary" onClick={authorize}>Autorizar diagnóstico</button>
-              </div>
-            </div>
-          )}
         </div>
-      )}
-
-      {jo.status === 'awaiting_quote' && (
-        <div className="os-done-box">
-          <i className="ti ti-circle-check-filled" aria-hidden="true"></i>
-          <div>
-            <strong>Diagnóstico concluído.</strong>
-            <p>{jo.diag_authorized_by_name ? `Autorizado por ${jo.diag_authorized_by_name}.` : ''} A OS está pronta para a fase de orçamento (próxima fatia).</p>
-          </div>
-        </div>
-      )}
-
-      {isOwner && jo.status !== 'delivered' && (
-        <button className="btn-ghost" style={{ width: '100%', justifyContent: 'center', marginTop: 12 }}
-          onClick={async () => {
-            if (!confirm(`Marcar ${jo.number} como finalizada/entregue?\n\nAtalho temporário para fechar carros já tratados enquanto o ciclo completo não está pronto. Ignora o controlo de qualidade — usar só em testes.`)) return
-            try { await api(`/api/v1/receptions/${joId}/status`, { method: 'POST', body: JSON.stringify({ status: 'delivered', force: true }) }); load() }
-            catch (e: any) { alert(e?.message || 'Não foi possível finalizar.') }
-          }}>
-          <i className="ti ti-checkbox" aria-hidden="true"></i> Marcar como finalizada
-        </button>
-      )}
-
-      {jo.status === 'delivered' && (
-        <div className="os-done-box"><i className="ti ti-flag-check" aria-hidden="true"></i><div><strong>Finalizada / entregue.</strong></div></div>
       )}
     </main>
+  )
+}
+
+// O que EU lancei para este carro (quem não é dono): sem totais nem margens.
+function MeusGastosCarro({ joId, onLancar, onEdit }: { joId: string; onLancar: () => void; onEdit: (e: any) => void }) {
+  const [rows, setRows] = useState<any[] | null>(null)
+  useEffect(() => { api(`/api/v1/ledger?jobOrderId=${joId}`).then(r => setRows(r.entries || [])).catch(() => setRows([])) }, [joId])
+  return (
+    <div>
+      <h2 className="sec-title">O que lancei para este carro</h2>
+      {rows && rows.length === 0 && <p className="hint" style={{ margin: '0 0 10px' }}>Ainda não lançaste nada para este carro.</p>}
+      {rows && rows.length > 0 && (
+        <div className="lanc-recent" style={{ marginBottom: 12 }}>
+          {rows.map((r: any) => (
+            <div key={r.id} className="lanc-recent-row">
+              <button className="lanc-recent-main" onClick={() => r.pending_review && onEdit(r)}>
+                <span className="lanc-recent-desc">{r.category_name || '—'}</span>
+                <span className="sub">{[r.description, r.entry_date ? new Date(r.entry_date).toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' }) : null, r.has_receipt ? 'com factura' : 'sem factura'].filter(Boolean).join(' · ')}</span>
+              </button>
+              <div className="lanc-recent-fim">
+                <span className={`lanc-recent-val ${Number(r.revenue) > 0 ? 'rev' : 'cost'}`}>{Number(r.revenue) > 0 ? '+' : '−'}{fmtMT(Number(r.revenue) > 0 ? r.revenue : r.cost)}</span>
+                <span className={`pill ${r.pending_review ? 'ph-quote' : 'ph-working'}`}>{r.pending_review ? 'Por validar' : 'Validado'}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <button className="btn-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={onLancar}><i className="ti ti-plus" aria-hidden="true"></i> Lançar gasto neste carro</button>
+    </div>
   )
 }
 
