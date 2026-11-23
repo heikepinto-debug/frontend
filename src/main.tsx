@@ -97,7 +97,7 @@ function Login() {
   )
 }
 
-type ListFilter = 'all' | 'draft' | 'diagnosis' | 'quote' | 'working' | 'qc' | 'ready' | 'delivered'
+type ListFilter = 'all' | 'draft' | 'diagnosis' | 'quote' | 'working' | 'qc' | 'ready' | 'delivered' | 'stale'
 
 // ── HOJE — o ecrã de entrada ─────────────────────────────────
 // Responde a «o que está à minha espera?». Os blocos vêm do servidor
@@ -113,7 +113,24 @@ const NEED_TXT: Record<string, { um: string; varios: string; tom: string; sub?: 
   mine:      { um: 'Carro com trabalho teu', varios: 'Carros com trabalho teu', tom: 'green' },
 }
 const nomeCarro = (c: any) => [c.brand, c.model].filter(Boolean).join(' ') || c.plate || 'Carro'
-function Hoje({ data, nome, oficina, onOpenCar, onList, onGo }: { data: any; nome: string; oficina: string; onOpenCar: (id: string) => void; onList: (f: string) => void; onGo: (v: string) => void }) {
+const MOTIVOS_PARADO = ['À espera de peça', 'À espera do cliente', 'À espera de pagamento', 'Trabalho demorado', 'Outro']
+function Hoje({ data, nome, oficina, onOpenCar, onList, onGo, onReload }: { data: any; nome: string; oficina: string; onOpenCar: (id: string) => void; onList: (f: string) => void; onGo: (v: string) => void; onReload: () => void }) {
+  const [just, setJust] = useState<any>(null)   // pendente a justificar: { item, reason, note, days }
+  const [justErr, setJustErr] = useState<string | null>(null)
+  const [justBusy, setJustBusy] = useState(false)
+  const porTratar: any[] = data?.stale?.untreated || [], tratados: any[] = data?.stale?.treated || []
+  const tipoParado = (c: any) => c.kind === 'booking' ? 'Marcação que já passou' : c.kind === 'draft' ? 'Entrada por acabar' : (STATUS_LABEL[c.status] || c.status)
+  const abrirParado = (c: any) => c.kind === 'booking' ? onGo('bookings') : c.kind === 'draft' ? onList('draft') : onOpenCar(c.id)
+  const justificar = async () => {
+    if (!just?.reason) { setJustErr('Escolhe o motivo.'); return }
+    if (just.reason === 'Outro' && (just.note || '').trim().length < 3) { setJustErr('Explica em poucas palavras.'); return }
+    setJustBusy(true); setJustErr(null)
+    try {
+      await api(`/api/v1/stale/${just.item.id}/ack`, { method: 'POST', body: JSON.stringify({ reason: just.reason, note: just.note || null, days: just.days }) })
+      setJust(null); onReload()
+    } catch (e: any) { setJustErr(e?.message || 'Não foi possível guardar.') }
+    finally { setJustBusy(false) }
+  }
   const h = new Date().getHours()
   const saud = h < 12 ? 'Bom dia' : h < 19 ? 'Boa tarde' : 'Boa noite'
   const needs: any[] = data?.needs || []
@@ -180,21 +197,69 @@ function Hoje({ data, nome, oficina, onOpenCar, onList, onGo }: { data: any; nom
           </div>
         </section>
 
-        {(data?.stalled || []).length > 0 && (
+        {data?.stale && (porTratar.length > 0 || tratados.length > 0) && (
           <section>
-            <h2 className="sec-title">Parados há mais tempo</h2>
-            <div className="need-list">
-              {data.stalled.map((c: any) => (
-                <button key={c.id} className="need-row" onClick={() => onOpenCar(c.id)}>
-                  <span className="need-txt">
-                    <strong>{nomeCarro(c)} · {c.plate}</strong>
-                    <span>{STATUS_LABEL[c.status] || c.status}</span>
-                  </span>
-                  <span className="stalled-days">{c.days} dias</span>
-                </button>
-              ))}
-            </div>
+            <h2 className="sec-title">Parados há {data.stale.days} {data.stale.days === 1 ? 'dia' : 'dias'} ou mais</h2>
+            {porTratar.length > 0 && (
+              <>
+                <div className="parado-aviso" role="status">
+                  <i className="ti ti-alert-triangle" aria-hidden="true"></i>
+                  <span><strong>{porTratar.length} sem tratamento.</strong> Cada um precisa de avançar ou de uma justificação.</span>
+                </div>
+                <div className="need-list">
+                  {porTratar.map((c: any) => (
+                    <div key={c.id} className="parado-row">
+                      <button className="parado-main" onClick={() => abrirParado(c)}>
+                        <strong>{nomeCarro(c)}{c.plate ? ` · ${c.plate}` : ''}</strong>
+                        <span>{[tipoParado(c), c.customer].filter(Boolean).join(' · ')}</span>
+                      </button>
+                      <span className="stalled-days">{c.days} dias</span>
+                      <button className="btn-just" onClick={() => { setJustErr(null); setJust({ item: c, reason: '', note: '', days: 3 }) }}>Justificar</button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            {tratados.length > 0 && (
+              <>
+                <div className="sub-title">Justificados · {tratados.length}</div>
+                <div className="need-list">
+                  {tratados.map((c: any) => (
+                    <button key={c.id} className="need-row" onClick={() => abrirParado(c)}>
+                      <span className="need-txt">
+                        <strong>{nomeCarro(c)}{c.plate ? ` · ${c.plate}` : ''}</strong>
+                        <span>{[c.reason, c.note, c.by, `até ${new Date(c.until).toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' })}`].filter(Boolean).join(' · ')}</span>
+                      </span>
+                      <span className="stalled-days ok">{c.days} dias</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </section>
+        )}
+
+        {just && (
+          <div className="modal-scrim" onClick={() => setJust(null)}>
+            <div className="modal-card" onClick={e => e.stopPropagation()}>
+              <div className="modal-title">Porque está parado?</div>
+              <p className="modal-detail">{nomeCarro(just.item)}{just.item.plate ? ` · ${just.item.plate}` : ''} · {just.item.days} dias sem movimento. O dono vê esta justificação.</p>
+              <div className="chips" style={{ marginTop: 12 }}>
+                {MOTIVOS_PARADO.map(m => <button key={m} className={`chip ${just.reason === m ? 'on' : ''}`} aria-pressed={just.reason === m} onClick={() => setJust({ ...just, reason: m })}>{m}</button>)}
+              </div>
+              <label className="fl" htmlFor="just-nota" style={{ marginTop: 12 }}>Nota {just.reason === 'Outro' ? '' : '(opcional)'}</label>
+              <input id="just-nota" value={just.note} onChange={e => setJust({ ...just, note: e.target.value })} placeholder="ex.: peça chega na sexta" />
+              <div className="fl" style={{ marginTop: 12 }}>Voltar a lembrar daqui a</div>
+              <div className="chips">
+                {[1, 3, 7].map(n => <button key={n} className={`chip ${just.days === n ? 'on' : ''}`} aria-pressed={just.days === n} onClick={() => setJust({ ...just, days: n })}>{n} {n === 1 ? 'dia' : 'dias'}</button>)}
+              </div>
+              {justErr && <div className="field-warn" style={{ marginTop: 10 }}>{justErr}</div>}
+              <div className="rec-nav" style={{ marginTop: 16 }}>
+                <button className="btn-ghost" onClick={() => setJust(null)}>Cancelar</button>
+                <button className="btn-primary" disabled={justBusy} onClick={justificar}>{justBusy ? 'A guardar…' : 'Guardar justificação'}</button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </main>
@@ -204,12 +269,13 @@ function Hoje({ data, nome, oficina, onOpenCar, onList, onGo }: { data: any; nom
 function Shell() {
   const { tenant, user, logout } = useSession()
   const canDo = useSession(s => s.can)
+  const mustChange = useSession(s => s.mustChangePassword)
   const [novidades, setNovidades] = useState<any[] | null>(null)
   const [novPrimeira, setNovPrimeira] = useState(false)
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
   const [temUpdate, setTemUpdate] = useState(false)   // há versão nova à espera
-  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates' | 'ppi-model' | 'suppliers' | 'qcqueue' | 'admin' | 'quickbooking' | 'leads' | 'lancar' | 'gestao'>('home')
+  const [view, setView] = useState<'home' | 'reception' | 'list' | 'tasks' | 'detail' | 'bookings' | 'os' | 'authorizations' | 'errorlogs' | 'sign' | 'password' | 'complete' | 'queue' | 'servicetypes' | 'ppi' | 'ppi-list' | 'updates' | 'ppi-model' | 'suppliers' | 'qcqueue' | 'admin' | 'quickbooking' | 'leads' | 'lancar' | 'gestao' | 'team' | 'settings'>('home')
   const [resumeDraftId, setResumeDraftId] = useState<string | undefined>(undefined)
   const [leadPrefill, setLeadPrefill] = useState<any>(undefined)   // dados da marcação rápida + modo
   const [listFilter, setListFilter] = useState<ListFilter>('all')
@@ -245,6 +311,7 @@ function Shell() {
 
   const [summary, setSummary] = useState<any>(null)
   const [today, setToday] = useState<any>(null)
+  const [nagVisto, setNagVisto] = useState(false)
   const [navOpen, setNavOpen] = useState(false)  // menu no telemóvel
 
   // Ecrãs onde recarregar destrói trabalho não enviado (fotos e assinatura
@@ -278,11 +345,19 @@ function Shell() {
       api('/api/v1/os/awaiting-authorization').then(r => setAuthCount((r.data || []).length)).catch(() => {})
       api('/api/v1/os/awaiting-qc').then(r => setQcCount((r.data || []).length)).catch(() => {})
       api('/api/v1/dashboard/summary').then(setSummary).catch(() => {})
-      api('/api/v1/today').then(setToday).catch(() => {})
     }
   }, [view])
+  // «Hoje» e os pendentes parados: recarrega em qualquer ecrã de topo, para o
+  // aviso acompanhar quem gere por toda a app.
+  const loadToday = () => api('/api/v1/today').then(setToday).catch(() => {})
+  useEffect(() => { if (!['reception', 'sign', 'complete', 'ppi'].includes(view)) loadToday() }, [view])
 
   const canLedger = canDo('pricing:manage') || canDo('ledger:own')
+  // A app insiste com quem gere o dia-a-dia (não com o dono) enquanto houver
+  // pendentes parados sem tratamento: aviso ao abrir e faixa em todos os ecrãs.
+  const nParados = (today?.stale?.untreated || []).length
+  const insistir = nParados > 0 && canDo('os:manage') && !canDo('pricing:manage')
+  const nagAberto = insistir && !nagVisto && !novidades && !['reception', 'sign', 'complete', 'ppi', 'os'].includes(view)
   const pendLedger = (today?.needs || []).find((n: any) => n.key === 'ledger')?.count || 0
   const nav = (v: string, label: string, icon: string, count?: number, badge = false) => ({
     v, label, icon, count, badge,
@@ -306,6 +381,8 @@ function Shell() {
       canDo('config:manage') && nav('suppliers', 'Fornecedores', 'ti-building-store'),
       canDo('config:manage') && nav('ppi-model', 'Modelo de inspeção', 'ti-adjustments'),
       user?.platformAdmin && nav('admin', 'Oficinas (admin)', 'ti-building-skyscraper'),
+      isOwner && nav('team', 'Equipa', 'ti-users'),
+      canDo('config:manage') && nav('settings', 'Definições', 'ti-settings'),
       isOwner && nav('errorlogs', 'Registo de erros', 'ti-bug'),
       nav('updates', 'Novidades', 'ti-bell'),
       nav('password', 'A minha senha', 'ti-key'),
@@ -320,8 +397,11 @@ function Shell() {
   // Ecrãs "de topo": têm a barra de baixo no telemóvel. Os outros (carro,
   // entrada, assinatura…) são tarefas — têm o seu próprio "voltar".
   const TOPO = ['home', 'list', 'tasks', 'lancar', 'bookings', 'ppi-list', 'authorizations', 'qcqueue', 'updates',
-    'suppliers', 'servicetypes', 'ppi-model', 'admin', 'errorlogs', 'password']
+    'suppliers', 'servicetypes', 'ppi-model', 'admin', 'errorlogs', 'password', 'team', 'settings']
   const eTopo = TOPO.includes(view)
+
+  // Senha provisória: antes de mais nada, a pessoa escolhe a sua.
+  if (mustChange) return <div className="app-shell"><div className="content-area"><ChangePassword forcado onBack={() => {}} /></div></div>
 
   return (
     <div className="app-shell">
@@ -384,8 +464,27 @@ function Shell() {
         </div>
       </aside>
 
+      {nagAberto && (
+        <div className="modal-scrim">
+          <div className="modal-card">
+            <div className="modal-title">{nParados === 1 ? 'Há 1 pendente parado' : `Há ${nParados} pendentes parados`}</div>
+            <p className="modal-detail">Estão sem movimento há {today?.stale?.days} dias ou mais e ainda não tiveram tratamento. Cada um precisa de avançar ou de uma justificação.</p>
+            <div className="rec-nav" style={{ marginTop: 18 }}>
+              <button className="btn-ghost" onClick={() => setNagVisto(true)}>Agora não</button>
+              <button className="btn-primary" onClick={() => { setNagVisto(true); go('home') }}>Tratar agora</button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Área de conteúdo */}
       <div className={`content-area ${eTopo ? 'has-bottom-bar' : ''}`}>
+        {insistir && eTopo && view !== 'home' && (
+          <button className="nag-bar" onClick={() => go('home')}>
+            <i className="ti ti-alert-triangle" aria-hidden="true"></i>
+            <span><strong>{nParados} {nParados === 1 ? 'pendente parado' : 'pendentes parados'}</strong> sem tratamento</span>
+            <span className="nag-go">Tratar</span>
+          </button>
+        )}
         {!eTopo && view !== 'os' && (
           <header className="mobile-topbar">
             <button className="btn-ghost btn-sm" onClick={() => setNavOpen(true)} aria-label="Abrir menu"><i className="ti ti-menu-2" aria-hidden="true"></i></button>
@@ -398,7 +497,7 @@ function Shell() {
         <Hoje data={today} nome={user?.name?.split(' ')[0] || ''} oficina={tenant?.name || ''}
           onOpenCar={(id: string) => { setOsId(id); setOsReturnTo('home'); setView('os') }}
           onList={(f: any) => { setListFilter(f); setView('list') }}
-          onGo={go} />
+          onGo={go} onReload={loadToday} />
       )}
       {view === 'reception' && <Reception key={resumeDraftId || (leadPrefill?.id ? 'lead-' + leadPrefill.id : 'new')} resumeDraftId={resumeDraftId} leadPrefill={leadPrefill} onDone={() => { setResumeDraftId(undefined); setLeadPrefill(undefined); setView('list') }} onBack={() => { setResumeDraftId(undefined); setLeadPrefill(undefined); setView('home') }} onStartPPI={(joId: string) => { setResumeDraftId(undefined); setLeadPrefill(undefined); setPpiJoId(joId); setPpiReturnTo('list'); setView('ppi') }} />}
       {view === 'ppi' && ppiJoId && <PPICircuit joId={ppiJoId} onBack={() => setView(ppiReturnTo)} />}
@@ -414,7 +513,7 @@ function Shell() {
       {view === 'quickbooking' && <QuickBooking onBack={() => setView('home')} onDone={() => setView('leads')} />}
       {view === 'leads' && <LeadsList onBack={() => setView('home')} onStart={(lead: any, mode: string) => { setResumeDraftId(undefined); setLeadPrefill({ ...lead, mode }); setView('reception') }} />}
       {view === 'ppi-list' && <PPIList onBack={() => setView('home')} onOpen={(joId: string) => { setPpiJoId(joId); setPpiReturnTo('ppi-list'); setView('ppi') }} />}
-      {view === 'list' && <ReceptionList initialFilter={listFilter} onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
+      {view === 'list' && <ReceptionList staleDays={today?.stale?.days || 3} initialFilter={listFilter} onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} onOpen={(id: string) => { setDetailId(id); setView('detail') }} isOwner={isOwner} onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('list'); setView('os') }}
         onOpenPPI={(id: string) => { setPpiJoId(id); setPpiReturnTo('list'); setView('ppi') }}
         onSign={(id: string) => { setSignId(id); setView('sign') }}
         onComplete={(id: string) => { setCompleteId(id); setView('complete') }} />}
@@ -440,12 +539,14 @@ function Shell() {
         onBack={() => { setLedgerEdit(undefined); setLedgerCar(undefined); setView(ledgerBack) }}
         onEditDone={() => { setLedgerEdit(undefined); setLedgerCar(undefined); setView(ledgerBack) }} />}
       {view === 'errorlogs' && <ErrorLogs onBack={() => setView('home')} />}
+      {view === 'team' && isOwner && <Equipa />}
+      {view === 'settings' && canDo('config:manage') && <Definicoes />}
       {view === 'tasks' && <Tasks onBack={() => setView('home')} isOwner={isOwner} myId={user?.id || ''} />}
 
       {/* Barra de baixo — o essencial sempre à mão no telemóvel */}
       {eTopo && (
         <nav className="bottom-bar" aria-label="Navegação principal">
-          <button className={view === 'home' ? 'on' : ''} onClick={() => go('home')}><i className="ti ti-home" aria-hidden="true"></i>Hoje</button>
+          <button className={view === 'home' ? 'on' : ''} onClick={() => go('home')}><i className="ti ti-home" aria-hidden="true"></i>Hoje{insistir && <span className="bb-dot" aria-label={`${nParados} pendentes parados`}></span>}</button>
           {canDo('reception:read') && <button className={view === 'list' ? 'on' : ''} onClick={() => { setListFilter('all'); go('list') }}><i className="ti ti-car" aria-hidden="true"></i>Carros</button>}
           {canDo('reception:create') && (
             <button className="bb-new" onClick={novaEntrada} aria-label="Nova entrada de carro"><i className="ti ti-plus" aria-hidden="true"></i></button>
@@ -1875,7 +1976,10 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: 'Cancelado',
 }
 
-function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, onComplete, onOpenPPI, initialFilter }: { onBack: () => void; onResume: (id: string) => void; onOpen: (id: string) => void; isOwner: boolean; onOpenOS?: (id: string) => void; onSign?: (id: string) => void; onComplete?: (id: string) => void; onOpenPPI?: (id: string) => void; initialFilter?: ListFilter }) {
+function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, onComplete, onOpenPPI, initialFilter, staleDays }: { onBack: () => void; onResume: (id: string) => void; onOpen: (id: string) => void; isOwner: boolean; onOpenOS?: (id: string) => void; onSign?: (id: string) => void; onComplete?: (id: string) => void; onOpenPPI?: (id: string) => void; initialFilter?: ListFilter; staleDays?: number }) {
+  const prazo = staleDays || 3
+  const [selModo, setSelModo] = useState(false)          // seleccionar vários (só dono)
+  const [sel, setSel] = useState<Set<string>>(new Set())
   const podePreco = useSession(s => s.can('pricing:manage'))
   const podeQC = useSession(s => s.can('qc:approve'))
   const podePagar = useSession(s => s.can('payment:register'))
@@ -1958,15 +2062,48 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
     : r.status === 'quality_check' || (r.status === 'ready' && r.qc_status !== 'approved') ? 'qc'
     : 'ready'
   const naOficina = rows.filter(r => r.status !== 'delivered' && r.status !== 'cancelled')
-  const conta = (f: ListFilter) => f === 'all' ? naOficina.length : rows.filter(r => faseDe(r) === f).length
-  const CHIPS: [ListFilter, string][] = [['all', 'Todos'], ['draft', 'Por acabar'], ['diagnosis', 'Diagnóstico'], ['quote', 'Orçamento'],
+  const parado = (r: any) => r.status !== 'delivered' && r.status !== 'cancelled' && Number(r.idle_days || 0) >= prazo
+  const passa = (r: any, f: ListFilter) => f === 'all' ? (r.status !== 'delivered' && r.status !== 'cancelled') : f === 'stale' ? parado(r) : faseDe(r) === f
+  const conta = (f: ListFilter) => rows.filter(r => passa(r, f)).length
+  const visiveis = rows.filter(r => passa(r, filter))
+  const alternar = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const sairSel = () => { setSelModo(false); setSel(new Set()) }
+  const emMassa = (action: 'deliver' | 'archive') => {
+    const ids = [...sel]; if (!ids.length) return
+    const rascunhos = rows.filter(r => sel.has(r.id) && r.status === 'draft').length
+    setAsk(action === 'deliver' ? {
+      text: `Marcar ${ids.length} ${ids.length === 1 ? 'carro' : 'carros'} como entregues?`,
+      detail: `Fecha os serviços e os problemas em aberto de cada um e ignora o controlo de qualidade. Fica registado que foste tu.${rascunhos ? ` ${rascunhos} ${rascunhos === 1 ? 'é uma entrada por acabar e fica de fora' : 'são entradas por acabar e ficam de fora'} — essas só se arquivam.` : ''}`,
+      yes: 'Marcar como entregues',
+      run: () => correrMassa(ids, action),
+    } : {
+      text: `Arquivar ${ids.length} ${ids.length === 1 ? 'registo' : 'registos'}?`,
+      detail: 'Para o que nunca chegou a ser feito ou já nem está na oficina. Sai das listas mas não é apagado: fica no histórico.',
+      yes: 'Arquivar', danger: true,
+      run: () => correrMassa(ids, action),
+    })
+  }
+  const correrMassa = async (ids: string[], action: string) => {
+    try {
+      let feitos = 0
+      for (let i = 0; i < ids.length; i += 100) {
+        const r = await api('/api/v1/receptions/bulk', { method: 'POST', body: JSON.stringify({ ids: ids.slice(i, i + 100), action }) })
+        feitos += r.done || 0
+      }
+      setMsg({ kind: 'ok', text: `${feitos} ${feitos === 1 ? 'tratado' : 'tratados'}${feitos < ids.length ? ` · ${ids.length - feitos} ficaram de fora` : ''}.` })
+      sairSel(); load(search.trim())
+    } catch (e: any) { erro(e?.message || 'Não foi possível concluir.') }
+  }
+  const CHIPS: [ListFilter, string][] = [['all', 'Todos'], ['stale', 'Parados'], ['draft', 'Por acabar'], ['diagnosis', 'Diagnóstico'], ['quote', 'Orçamento'],
     ['working', 'Em trabalho'], ['qc', 'QC'], ['ready', 'Prontos'], ['delivered', 'Entregues']]
 
   return (
     <main className="reception carros">
       <div className="page-head">
         <h1>Carros</h1>
-        <span className="page-head-sub">{naOficina.length} na oficina</span>
+        {canStatus && !selModo
+          ? <button className="btn-ghost btn-sm" onClick={() => setSelModo(true)}><i className="ti ti-checkbox" aria-hidden="true"></i> Seleccionar</button>
+          : <span className="page-head-sub">{naOficina.length} na oficina</span>}
       </div>
 
       <div className="search-box">
@@ -1978,7 +2115,7 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
 
       <div className="list-filters">
         {CHIPS.filter(([v]) => v === 'all' || v === filter || v === 'delivered' || conta(v) > 0).map(([v, l]) => (
-          <button key={v} className={`filter-chip ${filter === v ? 'on' : ''}`} onClick={() => setFilter(v)}>
+          <button key={v} className={`filter-chip ${filter === v ? 'on' : ''} ${v === 'stale' ? 'aviso' : ''}`} onClick={() => setFilter(v)}>
             {l}{v !== 'delivered' && <span className="chip-n">{conta(v)}</span>}
           </button>
         ))}
@@ -2003,7 +2140,7 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
       {menu && <div className="pop-scrim" onClick={() => setMenu(null)} />}
       <div className="car-list">
         {(() => {
-          const visible = rows.filter(r => filter === 'all' ? (r.status !== 'delivered' && r.status !== 'cancelled') : faseDe(r) === filter)
+          const visible = visiveis
           return <>
           {visible.map(r => {
           const isDraft = r.status === 'draft'
@@ -2046,8 +2183,9 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
 
           const rotulo = isDraft ? 'Rascunho' : fase === 'qc' && r.status === 'ready' ? 'Falta o QC' : (STATUS_LABEL[r.status] || r.status)
           return (
-            <div key={r.id} className={`car-card ${isDraft ? 'is-draft' : ''}`}>
-              <button className="car-main" onClick={() => (passo.run ? passo.run() : onOpen(r.id))}>
+            <div key={r.id} className={`car-card ${isDraft ? 'is-draft' : ''} ${selModo && sel.has(r.id) ? 'sel' : ''}`}>
+              <button className="car-main" aria-pressed={selModo ? sel.has(r.id) : undefined} onClick={() => (selModo ? alternar(r.id) : passo.run ? passo.run() : onOpen(r.id))}>
+                {selModo && <i className={`ti ${sel.has(r.id) ? 'ti-square-check' : 'ti-square'} car-check`} aria-hidden="true"></i>}
                 <span className="car-id">
                   <span className="car-plate">{r.plate || '—'}</span>
                   <span className="car-sub">{[[r.brand, r.model].filter(Boolean).join(' '), r.customer_name].filter(Boolean).join(' · ')}</span>
@@ -2061,8 +2199,8 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
                 </div>
               )}
               <div className="car-foot">
-                <span className={`car-next ${passo.alerta ? 'alerta' : ''}`}>{passo.txt}<span className="car-num">{r.number}</span></span>
-                <div className="car-acts">
+                <span className={`car-next ${passo.alerta ? 'alerta' : ''}`}>{passo.txt}<span className="car-num">{r.number}</span>{parado(r) && <span className="car-idle">parado há {r.idle_days} dias</span>}</span>
+                <div className="car-acts" style={selModo ? { display: 'none' } : undefined}>
                   {passo.btn && <button className="btn-primary btn-sm" onClick={passo.run}>{passo.btn}</button>}
                   <button className="btn-icon" aria-label={`Mais opções para ${r.plate || r.number}`} aria-expanded={menu === r.id} onClick={() => setMenu(menu === r.id ? null : r.id)}>
                     <i className={`ti ${pdfBusy === r.id ? 'ti-loader' : 'ti-dots-vertical'}`} aria-hidden="true"></i>
@@ -2086,6 +2224,19 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
           </>
         })()}
       </div>
+      {selModo && (
+        <div className="sel-bar">
+          <div className="sel-bar-top">
+            <strong>{sel.size} {sel.size === 1 ? 'seleccionado' : 'seleccionados'}</strong>
+            <button className="btn-ghost btn-sm" onClick={() => setSel(new Set(visiveis.map(r => r.id)))}>Todos deste filtro ({visiveis.length})</button>
+            <button className="btn-ghost btn-sm" onClick={sairSel}>Sair</button>
+          </div>
+          <div className="sel-bar-acts">
+            <button className="btn-next fraco" disabled={sel.size === 0} onClick={() => emMassa('archive')}>Arquivar</button>
+            <button className="btn-next" disabled={sel.size === 0} onClick={() => emMassa('deliver')}>Marcar como entregues</button>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
@@ -3820,7 +3971,7 @@ function SyncQueue({ onBack }: { onBack: () => void }) {
 }
 
 // ── FILA DE SINCRONIZAÇÃO acaba aqui ─────────────────────────
-function ChangePassword({ onBack }: { onBack: () => void }) {
+function ChangePassword({ onBack, forcado }: { onBack: () => void; forcado?: boolean }) {
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -3836,8 +3987,9 @@ function ChangePassword({ onBack }: { onBack: () => void }) {
     if (!canSave) return
     setBusy(true); setErr(null)
     try {
-      await api('/api/v1/auth/change-password', { method: 'POST', body: JSON.stringify({ current, next }) })
+      await api('/auth/change-password', { method: 'POST', body: JSON.stringify({ current, next }) })
       setDone(true)
+      useSession.getState().setSession({ mustChangePassword: false })
     } catch (e: any) { setErr(e?.message || 'Não foi possível mudar a senha.') }
     finally { setBusy(false) }
   }
@@ -3857,12 +4009,12 @@ function ChangePassword({ onBack }: { onBack: () => void }) {
   return (
     <main className="reception">
       <div className="rec-top" style={{ marginBottom: 16 }}>
-        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
-        <h2 style={{ margin: 0, fontSize: 18 }}>Mudar a minha senha</h2><span />
+        {forcado ? <span /> : <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>}
+        <h2 style={{ margin: 0, fontSize: 18 }}>{forcado ? 'Escolhe a tua senha' : 'Mudar a minha senha'}</h2><span />
       </div>
-      <p className="hint" style={{ marginBottom: 14 }}>A senha é sua e ninguém a vê. Se a esquecer, a Direcção pode repô-la.</p>
+      <p className="hint" style={{ marginBottom: 14 }}>{forcado ? 'A senha que te deram é provisória. Escolhe uma só tua para continuar.' : 'A senha é sua e ninguém a vê. Se a esquecer, o dono da oficina pode dar-lhe uma nova.'}</p>
 
-      <label className="fl">Senha actual <span className="req">*</span></label>
+      <label className="fl">{forcado ? 'Senha provisória' : 'Senha actual'} <span className="req">*</span></label>
       <input type="password" value={current} onChange={e => setCurrent(e.target.value)} autoComplete="current-password" />
 
       <label className="fl" style={{ marginTop: 14 }}>Nova senha <span className="req">*</span></label>
@@ -6213,7 +6365,9 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry, onLancarGasto,
     : { txt: `${problems.length} ${problems.length === 1 ? 'problema registado' : 'problemas registados'}. Quando estiver completo, submete.`, btn: authOn ? 'Submeter diagnóstico' : 'Concluir diagnóstico', run: submitDiagnosis }
   else if (isReview) passo = iSubmitted
     ? { txt: 'Submetido. À espera de autorização.', btn: 'Retirar submissão', run: withdrawDiagnosis, fraco: true }
-    : { txt: `Diagnóstico de ${jo.diag_submitted_by_name || 'um colega'} à espera da tua autorização.`, btn: aba === 'diag' ? undefined : 'Rever e autorizar', run: () => setTab('diag') }
+    : podeGerirOS
+      ? { txt: `Diagnóstico de ${jo.diag_submitted_by_name || 'um colega'} à espera da tua autorização.`, btn: aba === 'diag' ? undefined : 'Rever e autorizar', run: () => setTab('diag') }
+      : { txt: 'Diagnóstico à espera de autorização da gestão.' }
   else if (jo.status === 'awaiting_quote') passo = podePreco
     ? { txt: 'Falta dar preço aos serviços.', btn: aba === 'trabalho' ? undefined : 'Dar preço', run: () => setTab('trabalho') }
     : { txt: 'À espera do preço da gestão.' }
@@ -6341,6 +6495,8 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry, onLancarGasto,
                 <p className="det-notes">Submetido por {jo.diag_submitted_by_name}. {authOn && 'A autorização assume a responsabilidade técnica partilhada pelo diagnóstico.'}</p>
                 {iSubmitted ? (
                   <p className="det-empty">Não podes autorizar o teu próprio diagnóstico. Se te enganaste, podes retirar a submissão enquanto ninguém a autorizar.</p>
+                ) : !podeGerirOS ? (
+                  <p className="det-empty">A autorização é feita pela gestão.</p>
                 ) : !showAuth && !rejecting ? (
                   <div className="rec-nav">
                     <button className="btn-ghost danger" onClick={() => setRejecting(true)}>Recusar</button>
@@ -6489,6 +6645,337 @@ function MeusGastosCarro({ joId, onLancar, onEdit }: { joId: string; onLancar: (
       )}
       <button className="btn-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={onLancar}><i className="ti ti-plus" aria-hidden="true"></i> Lançar gasto neste carro</button>
     </div>
+  )
+}
+
+// ── EQUIPA — quem entra na app e com que papel (só o dono) ───
+const PAPEL_DESC: Record<string, string> = {
+  owner: 'Vê e faz tudo: dinheiro, preços, equipa e definições.',
+  manager: 'Gere os carros, o controlo de qualidade e as entregas. Lança gastos, que ficam por validar.',
+  reception: 'Dá entrada aos carros, trata das marcações e regista pagamentos.',
+  technician: 'Vê os carros e trabalha nos serviços que lhe são atribuídos.',
+  store_seller: 'Trabalha na loja: vendas e stock.',
+}
+const senhaProvisoria = () => {
+  const a = 'abcdefghjkmnpqrstuvwxyz', n = '23456789'
+  const r = (s: string) => s[Math.floor(Math.random() * s.length)]
+  return Array.from({ length: 5 }, () => r(a)).join('') + '-' + Array.from({ length: 4 }, () => r(n)).join('')
+}
+function Equipa() {
+  const [d, setD] = useState<any>(null)
+  const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
+  const [ask, setAsk] = useState<any>(null)
+  const [novo, setNovo] = useState<any>(null)        // formulário de nova pessoa
+  const [aberto, setAberto] = useState<string | null>(null)
+  const [senhaDe, setSenhaDe] = useState<any>(null)  // { user, password } — senha nova a entregar
+  const [busy, setBusy] = useState(false)
+  const load = () => api('/api/v1/team').then(setD).catch((e: any) => setMsg({ kind: 'err', text: e?.message || 'Não foi possível carregar a equipa.' }))
+  useEffect(() => { load() }, [])
+  const papel = (id: string) => (d?.roles || []).find((r: any) => r.id === id)
+  const falha = (e: any, t: string) => setMsg({ kind: 'err', text: e?.message || t })
+
+  const criar = async () => {
+    if (busy) return
+    setBusy(true); setMsg(null)
+    try {
+      await api('/api/v1/team', { method: 'POST', body: JSON.stringify({ fullName: novo.fullName, email: novo.email, phone: novo.phone || null, roleId: novo.roleId, password: novo.password }) })
+      setSenhaDe({ nome: novo.fullName, email: novo.email, password: novo.password, nova: true }); setNovo(null); load()
+    } catch (e: any) { falha(e, 'Não foi possível criar o acesso.') }
+    finally { setBusy(false) }
+  }
+  const mudar = async (u: any, body: any, okTxt: string) => {
+    try { await api(`/api/v1/team/${u.id}`, { method: 'PATCH', body: JSON.stringify(body) }); setMsg({ kind: 'ok', text: okTxt }); load() }
+    catch (e: any) { falha(e, 'Não foi possível guardar.') }
+  }
+  const novaSenha = (u: any) => setAsk({
+    text: `Definir uma senha nova para ${u.full_name}?`,
+    detail: 'A senha actual deixa de funcionar e a pessoa sai da app onde estiver. Ao entrar com a senha nova, escolhe a sua.',
+    yes: 'Criar senha nova',
+    run: async () => {
+      const password = senhaProvisoria()
+      try { await api(`/api/v1/team/${u.id}/password`, { method: 'POST', body: JSON.stringify({ password }) }); setSenhaDe({ nome: u.full_name, email: u.email, password }); load() }
+      catch (e: any) { falha(e, 'Não foi possível definir a senha.') }
+    },
+  })
+  const desactivar = (u: any) => setAsk({
+    text: `Desactivar o acesso de ${u.full_name}?`,
+    detail: 'Deixa de conseguir entrar e sai da app onde estiver. O que fez fica registado. Podes reactivar quando quiseres.',
+    yes: 'Desactivar', danger: true,
+    run: () => mudar(u, { active: false }, 'Acesso desactivado.'),
+  })
+
+  const activos = (d?.users || []).filter((u: any) => u.active), inactivos = (d?.users || []).filter((u: any) => !u.active)
+  const linha = (u: any) => {
+    const r = papel(u.role_id), eu = u.id === d.me, ab = aberto === u.id
+    return (
+      <div key={u.id} className={`pessoa ${ab ? 'aberta' : ''} ${u.active ? '' : 'inactiva'}`}>
+        <button className="pessoa-main" aria-expanded={ab} onClick={() => setAberto(ab ? null : u.id)}>
+          <span className="pessoa-av" aria-hidden="true">{(u.full_name || '?').trim()[0]?.toUpperCase()}</span>
+          <span className="pessoa-txt">
+            <strong>{u.full_name}{eu ? ' (tu)' : ''}</strong>
+            <span>{u.email}</span>
+          </span>
+          <span className={`pill ${r?.is_owner ? 'ph-ready' : ''}`}>{u.active ? (r?.name || 'Sem papel') : 'Desactivado'}</span>
+        </button>
+        {ab && (
+          <div className="pessoa-det">
+            <div className="pessoa-meta">
+              {u.last_login_at ? `Última entrada: ${new Date(u.last_login_at).toLocaleDateString('pt-PT', { day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' })}` : 'Ainda não entrou na app.'}
+              {u.must_change_password ? ' · Com senha provisória.' : ''}
+            </div>
+            {eu ? <p className="hint" style={{ margin: 0 }}>Este és tu. Para mudares a tua senha usa "A minha senha" no menu.</p> : u.active ? (
+              <>
+                <label className="fl" htmlFor={`papel-${u.id}`}>Papel</label>
+                <select id={`papel-${u.id}`} value={u.role_id || ''} onChange={e => mudar(u, { roleId: e.target.value }, 'Papel alterado. A pessoa apanha as permissões novas em menos de um minuto.')}>
+                  {!u.role_id && <option value="">— escolher —</option>}
+                  {d.roles.map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                </select>
+                {r && PAPEL_DESC[r.code] && <div className="lanc-nature">{PAPEL_DESC[r.code]}</div>}
+                <div className="pessoa-acts">
+                  <button className="btn-ghost" onClick={() => novaSenha(u)}><i className="ti ti-key" aria-hidden="true"></i> Senha nova</button>
+                  <button className="btn-ghost danger" onClick={() => desactivar(u)}><i className="ti ti-user-off" aria-hidden="true"></i> Desactivar</button>
+                </div>
+              </>
+            ) : (
+              <div className="pessoa-acts">
+                <button className="btn-primary btn-sm" onClick={() => mudar(u, { active: true }, 'Acesso reactivado.')}>Reactivar acesso</button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <main className="reception equipa">
+      <div className="page-head">
+        <h1>Equipa</h1>
+        {d && <span className="page-head-sub">{activos.length} {activos.length === 1 ? 'pessoa com acesso' : 'pessoas com acesso'}</span>}
+      </div>
+      <Banner msg={msg} onClose={() => setMsg(null)} />
+      <ConfirmBox ask={ask} onNo={() => setAsk(null)} onYes={() => { const r = ask?.run; setAsk(null); r?.() }} />
+
+      {senhaDe && (
+        <div className="modal-scrim">
+          <div className="modal-card">
+            <div className="modal-title">{senhaDe.nova ? 'Acesso criado' : 'Senha nova criada'}</div>
+            <p className="modal-detail">Entrega estes dados a {senhaDe.nome}. A senha é provisória: ao entrar, a app pede-lhe para escolher a sua. <strong>Não volta a aparecer</strong> — copia-a agora.</p>
+            <div className="senha-box"><span>Email</span><strong>{senhaDe.email}</strong><span>Senha provisória</span><strong className="senha-val">{senhaDe.password}</strong></div>
+            <div className="rec-nav" style={{ marginTop: 16 }}>
+              <button className="btn-ghost" onClick={() => { navigator.clipboard?.writeText(`OficinaHub\nEmail: ${senhaDe.email}\nSenha provisória: ${senhaDe.password}`).then(() => setMsg({ kind: 'ok', text: 'Copiado.' })).catch(() => {}) }}><i className="ti ti-copy" aria-hidden="true"></i> Copiar</button>
+              <button className="btn-primary" onClick={() => setSenhaDe(null)}>Já entreguei</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!novo ? (
+        <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginBottom: 16 }}
+          onClick={() => setNovo({ fullName: '', email: '', phone: '', roleId: (d?.roles || []).find((r: any) => r.code === 'technician')?.id || '', password: senhaProvisoria() })} disabled={!d}>
+          <i className="ti ti-user-plus" aria-hidden="true"></i> Adicionar pessoa
+        </button>
+      ) : (
+        <div className="lanc-card" style={{ marginBottom: 16 }}>
+          <h2 className="sec-title">Nova pessoa</h2>
+          <label className="fl" htmlFor="np-nome">Nome</label>
+          <input id="np-nome" value={novo.fullName} onChange={e => setNovo({ ...novo, fullName: e.target.value })} autoComplete="off" />
+          <label className="fl" htmlFor="np-email" style={{ marginTop: 10 }}>Email (é com ele que entra)</label>
+          <input id="np-email" type="email" value={novo.email} onChange={e => setNovo({ ...novo, email: e.target.value })} autoComplete="off" autoCapitalize="none" />
+          <label className="fl" htmlFor="np-papel" style={{ marginTop: 10 }}>Papel</label>
+          <select id="np-papel" value={novo.roleId} onChange={e => setNovo({ ...novo, roleId: e.target.value })}>
+            <option value="">— escolher —</option>
+            {(d?.roles || []).map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select>
+          {papel(novo.roleId) && PAPEL_DESC[papel(novo.roleId).code] && <div className="lanc-nature">{PAPEL_DESC[papel(novo.roleId).code]}</div>}
+          <label className="fl" htmlFor="np-senha" style={{ marginTop: 10 }}>Senha provisória</label>
+          <input id="np-senha" value={novo.password} onChange={e => setNovo({ ...novo, password: e.target.value })} autoComplete="off" />
+          <div className="lanc-nature">A pessoa escolhe a sua senha quando entrar pela primeira vez.</div>
+          <div className="lanc-acoes">
+            <button className="btn-factura" onClick={() => setNovo(null)}>Cancelar</button>
+            <button className="btn-primary lanc-guardar" disabled={busy || novo.fullName.trim().length < 2 || !/.+@.+\..+/.test(novo.email) || !novo.roleId || novo.password.length < 8} onClick={criar}>{busy ? 'A criar…' : 'Criar acesso'}</button>
+          </div>
+        </div>
+      )}
+
+      {!d && <p className="empty">A carregar…</p>}
+      {d && <div className="pessoa-lista">{activos.map(linha)}</div>}
+      {inactivos.length > 0 && (
+        <>
+          <h2 className="sec-title" style={{ marginTop: 22 }}>Sem acesso</h2>
+          <div className="pessoa-lista">{inactivos.map(linha)}</div>
+        </>
+      )}
+    </main>
+  )
+}
+
+// ── DEFINIÇÕES — a oficina, as regras e as categorias ────────
+function Definicoes() {
+  const podeCats = useSession(s => s.can('pricing:manage'))
+  const [w, setW] = useState<any>(null)
+  const [cats, setCats] = useState<any[]>([])
+  const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [nova, setNova] = useState<any>(null)
+  const [verInactivas, setVerInactivas] = useState(false)
+  const falha = (e: any, t: string) => setMsg({ kind: 'err', text: e?.message || t })
+  const loadCats = () => { if (podeCats) api('/api/v1/settings/categories').then(r => setCats(r.categories || [])).catch(() => {}) }
+  useEffect(() => {
+    api('/api/v1/settings/workshop').then(r => setW({ ...r.workshop, brand_primary_color: r.workshop?.brand_primary_color || '#5B6470' })).catch((e: any) => falha(e, 'Não foi possível carregar as definições.'))
+    loadCats()
+  }, [])
+
+  const guardar = async () => {
+    setBusy(true); setMsg(null)
+    try {
+      await api('/api/v1/settings/workshop', { method: 'PUT', body: JSON.stringify({
+        name: w.name, nuit: w.nuit || null, phone: w.phone || null, email: w.email || null, address: w.address || null,
+        brandColor: w.brand_primary_color, diagAuthorizationOn: !!w.diag_authorization_on, allowThirdPartySigner: !!w.allow_third_party_signer,
+        staleDays: Math.min(60, Math.max(1, parseInt(String(w.stale_days ?? 3), 10) || 3)) }) })
+      // aplica já o nome e a cor a esta sessão (os outros apanham na próxima entrada)
+      const s = useSession.getState()
+      if (s.tenant) s.setSession({ tenant: { ...s.tenant, name: w.name, brandPrimary: w.brand_primary_color } })
+      setMsg({ kind: 'ok', text: 'Definições guardadas.' })
+    } catch (e: any) { falha(e, 'Não foi possível guardar.') }
+    finally { setBusy(false) }
+  }
+  const mudarCat = async (c: any, body: any) => {
+    setCats(cs => cs.map(x => x.id === c.id ? { ...x, ...(body.teamVisible !== undefined ? { team_visible: body.teamVisible } : {}), ...(body.active !== undefined ? { active: body.active } : {}) } : x))
+    try { await api(`/api/v1/settings/categories/${c.id}`, { method: 'PATCH', body: JSON.stringify(body) }) }
+    catch (e: any) { falha(e, 'Não foi possível guardar a categoria.'); loadCats() }
+  }
+  const criarCat = async () => {
+    try {
+      await api('/api/v1/settings/categories', { method: 'POST', body: JSON.stringify({ flow: nova.flow, groupName: nova.groupName, name: nova.name, nature: nova.flow === 'cost' ? nova.nature : null, teamVisible: nova.teamVisible }) })
+      setNova(null); loadCats(); setMsg({ kind: 'ok', text: 'Categoria criada.' })
+    } catch (e: any) { falha(e, 'Não foi possível criar a categoria.') }
+  }
+  const gruposDe = (flow: string) => {
+    const out: [string, any[]][] = []
+    for (const c of cats.filter(c => c.flow === flow && (verInactivas || c.active))) {
+      const g = out.find(x => x[0] === c.group_name); if (g) g[1].push(c); else out.push([c.group_name, [c]])
+    }
+    return out
+  }
+  const nomesGrupo = [...new Set(cats.filter(c => c.flow === (nova?.flow || 'cost')).map(c => c.group_name))]
+  const Sw = ({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) => (
+    <button role="switch" aria-checked={on} aria-label={label} className={`sw ${on ? 'on' : ''}`} onClick={() => onChange(!on)}><span /></button>
+  )
+
+  return (
+    <main className="reception definicoes">
+      <div className="page-head"><h1>Definições</h1></div>
+      <Banner msg={msg} onClose={() => setMsg(null)} />
+      {!w && <p className="empty">A carregar…</p>}
+      {w && (
+        <>
+          <div className="lanc-card">
+            <h2 className="sec-title">A oficina</h2>
+            <label className="fl" htmlFor="df-nome">Nome</label>
+            <input id="df-nome" value={w.name || ''} onChange={e => setW({ ...w, name: e.target.value })} />
+            <div className="lanc-row2">
+              <div><label className="fl" htmlFor="df-nuit">NUIT</label><input id="df-nuit" value={w.nuit || ''} onChange={e => setW({ ...w, nuit: e.target.value })} /></div>
+              <div><label className="fl" htmlFor="df-tel">Telefone</label><input id="df-tel" value={w.phone || ''} onChange={e => setW({ ...w, phone: e.target.value })} /></div>
+            </div>
+            <label className="fl" htmlFor="df-email" style={{ marginTop: 10 }}>Email</label>
+            <input id="df-email" value={w.email || ''} onChange={e => setW({ ...w, email: e.target.value })} />
+            <label className="fl" htmlFor="df-morada" style={{ marginTop: 10 }}>Morada</label>
+            <input id="df-morada" value={w.address || ''} onChange={e => setW({ ...w, address: e.target.value })} />
+
+            <div className="lanc-bloco">
+              <h2 className="sec-title">Cor da oficina</h2>
+              <div className="cor-linha">
+                <input type="color" aria-label="Cor da oficina" value={w.brand_primary_color} onChange={e => setW({ ...w, brand_primary_color: e.target.value })} />
+                <div className="cor-amostras">
+                  {['#4E6B1C', '#1E429F', '#9A3412', '#7C2D8A', '#0F766E', '#B42318', '#14181F'].map(c => (
+                    <button key={c} aria-label={`Cor ${c}`} className={w.brand_primary_color?.toLowerCase() === c.toLowerCase() ? 'on' : ''} style={{ background: c }} onClick={() => setW({ ...w, brand_primary_color: c })} />
+                  ))}
+                </div>
+                <span className="cor-previa" style={{ background: w.brand_primary_color }}>Botão</span>
+              </div>
+              <div className="lanc-nature">Usada nos botões principais. Escolhe uma cor escura o suficiente para o texto branco se ler bem.</div>
+            </div>
+
+            <div className="lanc-bloco">
+              <h2 className="sec-title">Regras</h2>
+              <div className="regra">
+                <div><strong>Diagnóstico precisa de autorização</strong><span>Depois de submetido, a gestão tem de o autorizar antes de seguir para orçamento.</span></div>
+                <Sw on={!!w.diag_authorization_on} onChange={v => setW({ ...w, diag_authorization_on: v })} label="Diagnóstico precisa de autorização" />
+              </div>
+              <div className="regra">
+                <div><strong>Prazo dos pendentes parados</strong><span>Ao fim de quantos dias sem movimento a app começa a insistir com a gestão (carros, marcações e entradas por acabar).</span></div>
+                <div className="dias-in"><input type="number" min={1} max={60} aria-label="Dias até um pendente contar como parado" value={w.stale_days ?? 3} onChange={e => setW({ ...w, stale_days: e.target.value })} /><span>dias</span></div>
+              </div>
+              <div className="regra">
+                <div><strong>Outra pessoa pode assinar pelo cliente</strong><span>Na entrada do carro, permite que assine quem o veio entregar, com nome e documento.</span></div>
+                <Sw on={!!w.allow_third_party_signer} onChange={v => setW({ ...w, allow_third_party_signer: v })} label="Outra pessoa pode assinar pelo cliente" />
+              </div>
+            </div>
+            <div className="lanc-acoes"><button className="btn-primary lanc-guardar" disabled={busy || !(w.name || '').trim()} onClick={guardar}>{busy ? 'A guardar…' : 'Guardar definições'}</button></div>
+          </div>
+
+          {podeCats && (
+            <div className="lanc-card" style={{ marginTop: 16 }}>
+              <div className="lanc-lista-head" style={{ margin: '0 0 4px' }}>
+                <h2 className="sec-title">Categorias de lançamento</h2>
+                <button className="btn-ghost btn-sm" onClick={() => setVerInactivas(!verInactivas)}>{verInactivas ? 'Esconder desactivadas' : 'Ver desactivadas'}</button>
+              </div>
+              <p className="hint" style={{ margin: '0 0 12px' }}>O interruptor decide se a <strong>equipa</strong> pode lançar nessa categoria. Tu podes sempre usar todas.</p>
+              {([['cost', 'Gastos'], ['revenue', 'Recebimentos']] as const).map(([flow, tit]) => (
+                <div key={flow} className="cat-flow">
+                  <div className="cat-flow-t">{tit}</div>
+                  {gruposDe(flow).map(([g, lista]) => (
+                    <div key={g} className="cat-grupo">
+                      <div className="chip-group-t">{g}</div>
+                      {lista.map((c: any) => (
+                        <div key={c.id} className={`cat-linha ${c.active ? '' : 'off'}`}>
+                          <span className="cat-nome">{c.name}{!c.active && <em> · desactivada</em>}</span>
+                          {c.active
+                            ? <><span className="cat-eq">{c.team_visible ? 'Equipa pode' : 'Só tu'}</span><Sw on={!!c.team_visible} onChange={v => mudarCat(c, { teamVisible: v })} label={`A equipa pode lançar em ${c.name}`} />
+                                <button className="btn-icon" aria-label={`Desactivar ${c.name}`} title="Desactivar" onClick={() => mudarCat(c, { active: false })}><i className="ti ti-eye-off" aria-hidden="true"></i></button></>
+                            : <button className="btn-ghost btn-sm" onClick={() => mudarCat(c, { active: true })}>Reactivar</button>}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              ))}
+              {!nova ? (
+                <button className="chip chip-mais" style={{ marginTop: 12 }} onClick={() => setNova({ flow: 'cost', groupName: '', name: '', nature: 'variable', teamVisible: false })}><i className="ti ti-plus" aria-hidden="true"></i> Nova categoria</button>
+              ) : (
+                <div className="lanc-bloco">
+                  <h2 className="sec-title">Nova categoria</h2>
+                  <div className="seg" style={{ marginBottom: 10 }}>
+                    <button className={nova.flow === 'cost' ? 'on' : ''} onClick={() => setNova({ ...nova, flow: 'cost' })}>Gasto</button>
+                    <button className={nova.flow === 'revenue' ? 'on' : ''} onClick={() => setNova({ ...nova, flow: 'revenue' })}>Recebimento</button>
+                  </div>
+                  <label className="fl" htmlFor="nc-nome">Nome</label>
+                  <input id="nc-nome" value={nova.name} onChange={e => setNova({ ...nova, name: e.target.value })} placeholder="ex.: Lavagem" />
+                  <label className="fl" htmlFor="nc-grupo" style={{ marginTop: 10 }}>Grupo</label>
+                  <input id="nc-grupo" list="nc-grupos" value={nova.groupName} onChange={e => setNova({ ...nova, groupName: e.target.value })} placeholder="ex.: Operação" />
+                  <datalist id="nc-grupos">{nomesGrupo.map(g => <option key={g} value={g} />)}</datalist>
+                  {nova.flow === 'cost' && (
+                    <div className="chips" style={{ marginTop: 10 }}>
+                      <button className={`chip ${nova.nature === 'variable' ? 'on' : ''}`} onClick={() => setNova({ ...nova, nature: 'variable' })}>Custo variável</button>
+                      <button className={`chip ${nova.nature === 'fixed' ? 'on' : ''}`} onClick={() => setNova({ ...nova, nature: 'fixed' })}>Custo fixo (todos os meses)</button>
+                    </div>
+                  )}
+                  <div className="regra" style={{ marginTop: 12 }}>
+                    <div><strong>A equipa pode lançar nesta categoria</strong></div>
+                    <Sw on={!!nova.teamVisible} onChange={v => setNova({ ...nova, teamVisible: v })} label="A equipa pode lançar nesta categoria" />
+                  </div>
+                  <div className="lanc-acoes">
+                    <button className="btn-factura" onClick={() => setNova(null)}>Cancelar</button>
+                    <button className="btn-primary lanc-guardar" disabled={nova.name.trim().length < 2 || nova.groupName.trim().length < 2} onClick={criarCat}>Criar categoria</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </main>
   )
 }
 

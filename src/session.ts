@@ -22,6 +22,7 @@ interface Session {
   roles: string[]
   permissions: string[]
   tenant: Tenant | null
+  mustChangePassword?: boolean   // senha provisória dada pelo dono
 
   setSession: (s: Partial<Session>) => void
   logout: () => void
@@ -49,7 +50,7 @@ export const useSession = create<Session>()(
 
       logout: () => {
         set({ accessToken: null, refreshToken: null, user: null,
-              roles: [], permissions: [], tenant: null })
+              roles: [], permissions: [], tenant: null, mustChangePassword: false })
         resetBranding()
       },
 

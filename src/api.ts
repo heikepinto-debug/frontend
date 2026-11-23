@@ -35,8 +35,9 @@ export async function api(path: string, opts: RequestInit = {}): Promise<any> {
       body: JSON.stringify({ refreshToken: s.refreshToken }),
     })
     if (r.ok) {
-      const { accessToken } = await r.json()
-      useSession.getState().setSession({ accessToken })
+      const { accessToken, permissions, roles } = await r.json()
+      // o papel pode ter mudado entretanto — a renovação traz as permissões actuais
+      useSession.getState().setSession({ accessToken, ...(permissions ? { permissions } : {}), ...(roles ? { roles } : {}) })
       res = await doFetch(accessToken)
     } else {
       useSession.getState().logout()
