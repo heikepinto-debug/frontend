@@ -1689,3 +1689,44 @@ button:focus-visible, a:focus-visible, [role="tab"]:focus-visible { outline: 2px
 .dias-in span { font-size: 13px; color: var(--ink-2); }
 @media (max-width: 820px) { .sel-bar { margin: 16px -16px 0; bottom: calc(68px + env(safe-area-inset-bottom, 0px)); } }
 @media (prefers-color-scheme: dark) { .car-idle { color: #F2B95C; } }
+
+
+/* ============================================================
+   v108 — MARCAÇÕES SIMPLES E DIAGNÓSTICO ELECTRÓNICO (scan)
+   ============================================================ */
+.car-card.marc.late { border-color: #E3B46C; }
+.marc-main { display: flex; flex-direction: column; gap: 3px; padding: 14px 14px 12px; min-width: 0; }
+.marc-when { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; font-weight: 600; color: var(--ink-2); text-transform: capitalize; }
+.marc-tag { font-size: 11.5px; font-weight: 600; text-transform: none; padding: 2px 8px; border-radius: 8px; background: #E3EBFB; color: #1E429F; }
+.marc-main strong { font-size: 16px; font-weight: 600; }
+.marc-tel { font-weight: 400; color: var(--ink-2); font-size: 14px; }
+.marc-main > span { font-size: 13.5px; color: var(--ink-2); }
+.marc-main p { margin: 4px 0 0; font-size: 14px; line-height: 1.4; color: var(--ink); }
+.sec-title.tom-aviso { color: #8A4B08; }
+.estado-lista button strong { font-weight: 600; }
+.scan-box { background: var(--s2); border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-bottom: 18px; }
+.scan-box.falta { border-color: #E3B46C; background: #FFFBF3; }
+.scan-box.ok { border-color: #C5D6A0; }
+.scan-head { display: flex; align-items: center; gap: 8px; }
+.scan-head i { font-size: 20px; color: var(--ink-2); flex-shrink: 0; }
+.scan-box.ok .scan-head i { color: #3F5716; }
+.scan-head strong { flex: 1; font-size: 15px; font-weight: 600; }
+.scan-txt { margin: 8px 0 0; font-size: 13.5px; line-height: 1.45; color: var(--ink-2); }
+.scan-files { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; margin-top: 10px; }
+.scan-file { position: relative; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.scan-file a { display: block; aspect-ratio: 1; border-radius: 10px; overflow: hidden; border: 1px solid var(--line-2); background: var(--s1); }
+.scan-file img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scan-pdf { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 32px; color: #B42318; }
+.scan-file-n { font-size: 11.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scan-file-x { position: absolute; top: -6px; right: -6px; width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line-2); background: var(--s2); color: var(--ink); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+.scan-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.scan-acts .btn-factura { min-height: 46px; flex: 1 1 140px; justify-content: center; }
+.scan-busy { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13.5px; color: var(--ink-2); }
+.scan-exc { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.scan-box .lanc-link { margin-top: 10px; }
+@media (prefers-color-scheme: dark) { .scan-box.falta { background: var(--s2); } }
+
+.marc-origem { display: flex; align-items: flex-start; gap: 10px; padding: 11px 13px; margin: 0 0 16px; border-radius: 12px; background: #E3EBFB; color: #16306F; font-size: 13.5px; line-height: 1.4; }
+.marc-origem i { font-size: 19px; flex-shrink: 0; margin-top: 1px; }
+.marc-origem strong { display: block; font-size: 12px; letter-spacing: .05em; text-transform: uppercase; }
+.marc-origem span { display: block; }

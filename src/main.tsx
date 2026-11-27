@@ -119,8 +119,8 @@ function Hoje({ data, nome, oficina, onOpenCar, onList, onGo, onReload }: { data
   const [justErr, setJustErr] = useState<string | null>(null)
   const [justBusy, setJustBusy] = useState(false)
   const porTratar: any[] = data?.stale?.untreated || [], tratados: any[] = data?.stale?.treated || []
-  const tipoParado = (c: any) => c.kind === 'booking' ? 'Marcação que já passou' : c.kind === 'draft' ? 'Entrada por acabar' : (STATUS_LABEL[c.status] || c.status)
-  const abrirParado = (c: any) => c.kind === 'booking' ? onGo('bookings') : c.kind === 'draft' ? onList('draft') : onOpenCar(c.id)
+  const tipoParado = (c: any) => c.kind === 'booking' || c.kind === 'lead' ? 'Marcação que já passou' : c.kind === 'draft' ? 'Entrada por acabar' : (STATUS_LABEL[c.status] || c.status)
+  const abrirParado = (c: any) => c.kind === 'booking' || c.kind === 'lead' ? onGo('bookings') : c.kind === 'draft' ? onList('draft') : onOpenCar(c.id)
   const justificar = async () => {
     if (!just?.reason) { setJustErr('Escolhe o motivo.'); return }
     if (just.reason === 'Outro' && (just.note || '').trim().length < 3) { setJustErr('Explica em poucas palavras.'); return }
@@ -208,13 +208,15 @@ function Hoje({ data, nome, oficina, onOpenCar, onList, onGo, onReload }: { data
                 </div>
                 <div className="need-list">
                   {porTratar.map((c: any) => (
-                    <div key={c.id} className="parado-row">
+                    <div key={c.kind + c.id} className="parado-row">
                       <button className="parado-main" onClick={() => abrirParado(c)}>
                         <strong>{nomeCarro(c)}{c.plate ? ` · ${c.plate}` : ''}</strong>
                         <span>{[tipoParado(c), c.customer].filter(Boolean).join(' · ')}</span>
                       </button>
                       <span className="stalled-days">{c.days} dias</span>
-                      <button className="btn-just" onClick={() => { setJustErr(null); setJust({ item: c, reason: '', note: '', days: 3 }) }}>Justificar</button>
+                      {c.kind === 'lead'
+                        ? <button className="btn-just" onClick={() => onGo('bookings')}>Tratar</button>
+                        : <button className="btn-just" onClick={() => { setJustErr(null); setJust({ item: c, reason: '', note: '', days: 3 }) }}>Justificar</button>}
                     </div>
                   ))}
                 </div>
@@ -340,7 +342,11 @@ function Shell() {
       api('/api/v1/bookings').then(r => {
         const now = new Date(); now.setHours(23, 59, 59, 999)
         const relevant = (r.data || []).filter((b: any) => new Date(b.booking_date) <= now)
-        setBookingCount(relevant.length)
+        // + as marcações simples de hoje, em atraso ou ainda sem data
+        api('/api/v1/bookings/leads').then(l => {
+          const simples = (l.data || []).filter((b: any) => !b.booking_date || new Date(b.booking_date) <= now)
+          setBookingCount(relevant.length + simples.length)
+        }).catch(() => setBookingCount(relevant.length))
       }).catch(() => {})
       api('/api/v1/os/awaiting-authorization').then(r => setAuthCount((r.data || []).length)).catch(() => {})
       api('/api/v1/os/awaiting-qc').then(r => setQcCount((r.data || []).length)).catch(() => {})
@@ -521,7 +527,8 @@ function Shell() {
         onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} isOwner={isOwner}
         onOpenOther={(id: string) => setDetailId(id)}
         onOpenOS={(id: string) => { setOsId(id); setOsReturnTo('detail'); setView('os') }} />}
-      {view === 'bookings' && <Bookings onBack={() => setView('home')} onResume={(id: string) => { setResumeDraftId(id); setView('reception') }} />}
+      {view === 'bookings' && <Bookings onResume={(id: string) => { setLeadPrefill(undefined); setResumeDraftId(id); setView('reception') }}
+        onStart={(lead: any, mode: string) => { setResumeDraftId(undefined); setLeadPrefill({ ...lead, mode }); setView('reception') }} />}
       {view === 'os' && osId && <OrderService joId={osId} onBack={() => setView(osReturnTo)} myId={user?.id || ''} isOwner={isOwner}
         onLancarGasto={(car: any) => { setLedgerEdit(undefined); setLedgerCar(car); setLedgerBack('os'); setView('lancar') }}
         onEditGasto={(e: any) => { setLedgerEdit(e); setLedgerCar(undefined); setLedgerBack('os'); setView('lancar') }} onOpenEntry={(id: string) => { setDetailId(id); setView('detail') }} />}
@@ -831,6 +838,10 @@ function Reception({ onDone, onBack, resumeDraftId, leadPrefill, onStartPPI }: {
     if (leadPrefill.customer_phone) setCustPhone(leadPrefill.customer_phone)
     if (leadPrefill.make) setBrand(leadPrefill.make)
     if (leadPrefill.model) setModel(leadPrefill.model)
+    if (leadPrefill.plate) setPlate(leadPrefill.plate)
+    // procura logo o cliente (pode já cá ter vindo): pelo contacto, senão pelo nome
+    const q = (leadPrefill.customer_phone || leadPrefill.customer_name || '').trim()
+    if (q.length >= 2) setCustSearch(q)
     if (leadPrefill.note) setSvcDesc(leadPrefill.note)
     if (leadPrefill.booking_date) setBookingDate(String(leadPrefill.booking_date).slice(0, 16))
     // o modo escolhido no LeadsList
@@ -1253,6 +1264,17 @@ function Reception({ onDone, onBack, resumeDraftId, leadPrefill, onStartPPI }: {
         {steps.map((_, i) => <div key={i} className={`rp-seg ${i < step ? 'done' : i === step ? 'cur' : ''}`} />)}
       </div>
 
+      {leadPrefill && (
+        <div className="marc-origem">
+          <i className="ti ti-calendar-event" aria-hidden="true"></i>
+          <div>
+            <strong>Da marcação</strong>
+            <span>{[leadPrefill.customer_name, leadPrefill.customer_phone, [leadPrefill.make, leadPrefill.model].filter(Boolean).join(' '), leadPrefill.plate].filter(Boolean).join(' · ') || 'Sem dados do cliente'}</span>
+            {leadPrefill.note && <span>«{leadPrefill.note}»</span>}
+          </div>
+        </div>
+      )}
+
       {/* 1 — CLIENTE */}
       {step === 0 && (
         <section>
@@ -1280,7 +1302,7 @@ function Reception({ onDone, onBack, resumeDraftId, leadPrefill, onStartPPI }: {
               {custSearch.trim().length >= 2 && !searching && custResults.length === 0 &&
                 <div className="hint">Nenhum cliente encontrado.</div>}
               <button className="btn-outline" style={{ marginTop: 14, width: '100%' }} onClick={() => setNewCust(true)}>
-                <i className="ti ti-plus" aria-hidden="true"></i> Novo cliente
+                <i className="ti ti-plus" aria-hidden="true"></i> {leadPrefill && (leadPrefill.customer_name || leadPrefill.customer_phone) ? 'Novo cliente, com os dados da marcação' : 'Novo cliente'}
               </button>
             </>
           )}
@@ -2167,7 +2189,9 @@ function ReceptionList({ onBack, onResume, onOpen, isOwner, onOpenOS, onSign, on
           else if (fase === 'delivered') passo = { txt: r.payment_status === 'paid' ? 'Entregue · pago' : 'Entregue' }
           else if (!temOS) passo = { txt: STATUS_LABEL[r.status] || r.status }
           else if (r.status === 'diagnosis_review') passo = { txt: 'Diagnóstico à espera de autorização', btn: 'Abrir', run: abrirOS }
-          else if (fase === 'diagnosis') passo = { txt: 'Falta fazer o diagnóstico', btn: r.os_opened_at ? 'Abrir' : 'Iniciar', run: abrirOS }
+          else if (fase === 'diagnosis') passo = r.scan_status === 'pending'
+            ? { txt: 'Falta o diagnóstico electrónico (scan)', btn: 'Fazer scan', run: abrirOS, alerta: true }
+            : { txt: 'Falta fazer o diagnóstico', btn: r.os_opened_at ? 'Abrir' : 'Iniciar', run: abrirOS }
           else if (r.status === 'awaiting_quote') passo = podePreco
             ? { txt: 'Falta dar preço ao orçamento', btn: 'Dar preço', run: abrirOS, alerta: true }
             : { txt: 'À espera do preço', btn: 'Abrir', run: abrirOS }
@@ -4251,132 +4275,207 @@ const CANCEL_REASONS = [
   'Outro',
 ]
 
-function Bookings({ onBack, onResume }: { onBack: () => void; onResume: (id: string) => void }) {
-  const [list, setList] = useState<any[]>([])
+function Bookings({ onResume, onStart }: { onBack?: () => void; onResume: (id: string) => void; onStart: (lead: any, mode: string) => void }) {
+  // Marcações num só sítio: as que já têm ficha começada (com cliente e carro
+  // completos) e as simples — registadas com o que houver, sem nada obrigatório.
+  // Quando o carro chega, «Chegou» abre a entrada já preenchida.
+  const podeCriar = useSession(s => s.can('reception:create'))
+  const [fichas, setFichas] = useState<any[]>([])
+  const [simples, setSimples] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [cancelId, setCancelId] = useState<string | null>(null)
-  const [reschedId, setReschedId] = useState<string | null>(null)
-  const [cancelReason, setCancelReason] = useState('')
-  const [cancelNote, setCancelNote] = useState('')
+  const [msg, setMsg] = useState<{ kind: 'err' | 'ok'; text: string } | null>(null)
+  const VAZIO = { customerName: '', customerPhone: '', plate: '', make: '', model: '', note: '', bookingDate: '' }
+  const [form, setForm] = useState<any>(null)            // nova ou a editar (form.id)
+  const [busy, setBusy] = useState(false)
+  const [menu, setMenu] = useState<string | null>(null)
+  const [chegou, setChegou] = useState<any>(null)        // marcação simples cujo carro chegou
+  const [cancelar, setCancelar] = useState<any>(null)
+  const [remarcar, setRemarcar] = useState<any>(null)
+  const [cancelReason, setCancelReason] = useState(''); const [cancelNote, setCancelNote] = useState('')
   const [newDate, setNewDate] = useState('')
+  const falha = (e: any, t: string) => setMsg({ kind: 'err', text: e?.message || t })
 
-  const load = () => { setLoading(true); api('/api/v1/bookings').then(r => setList(r.data || [])).catch(() => {}).finally(() => setLoading(false)) }
+  const load = () => {
+    setLoading(true)
+    Promise.all([
+      api('/api/v1/bookings').then(r => r.data || []).catch(() => []),
+      api('/api/v1/bookings/leads').then(r => r.data || []).catch(() => []),
+    ]).then(([a, b]) => { setFichas(a); setSimples(b) }).finally(() => setLoading(false))
+  }
   useEffect(() => { load() }, [])
 
-  const doCancel = async () => {
-    if (!cancelId || !cancelReason) return
-    try {
-      await api(`/api/v1/bookings/${cancelId}/cancel`, { method: 'POST', body: JSON.stringify({ reason: cancelReason, note: cancelNote || undefined }) })
-      setCancelId(null); setCancelReason(''); setCancelNote(''); load()
-    } catch { alert('Não foi possível cancelar.') }
-  }
-  const doResched = async () => {
-    if (!reschedId || !newDate) return
-    try {
-      await api(`/api/v1/bookings/${reschedId}/reschedule`, { method: 'POST', body: JSON.stringify({ bookingDate: newDate }) })
-      setReschedId(null); setNewDate(''); load()
-    } catch { alert('Não foi possível remarcar.') }
-  }
-
-  // agrupa: em atraso, hoje, futuras
-  const now = new Date()
-  const startToday = new Date(now); startToday.setHours(0, 0, 0, 0)
-  const endToday = new Date(now); endToday.setHours(23, 59, 59, 999)
-  const group = (b: any): 'late' | 'today' | 'future' => {
-    const d = new Date(b.booking_date)
-    if (d < startToday) return 'late'
-    if (d <= endToday) return 'today'
-    return 'future'
-  }
-  const late = list.filter(b => group(b) === 'late')
-  const today = list.filter(b => group(b) === 'today')
-  const future = list.filter(b => group(b) === 'future')
+  const itens = [
+    ...fichas.map((b: any) => ({ key: 'f' + b.id, id: b.id, simples: false, when: b.booking_date, who: b.customer_name, phone: b.customer_phone,
+      car: [b.brand, b.model].filter(Boolean).join(' '), plate: b.plate, note: b.service_description, raw: b })),
+    ...simples.map((l: any) => ({ key: 's' + l.id, id: l.id, simples: true, when: l.booking_date, who: l.customer_name, phone: l.customer_phone,
+      car: [l.make, l.model].filter(Boolean).join(' '), plate: l.plate, note: l.note, raw: l })),
+  ]
+  const ini = new Date(); ini.setHours(0, 0, 0, 0); const fim = new Date(); fim.setHours(23, 59, 59, 999)
+  const grupo = (i: any) => !i.when ? 'semdata' : new Date(i.when) < ini ? 'atraso' : new Date(i.when) <= fim ? 'hoje' : 'futuras'
+  const ord = (a: any, b: any) => new Date(a.when || 0).getTime() - new Date(b.when || 0).getTime()
+  const G: [string, string, string][] = [['atraso', 'Em atraso', 'late'], ['hoje', 'Hoje', 'today'], ['futuras', 'Próximas', ''], ['semdata', 'Sem data marcada', '']]
   const fmt = (s: string) => new Date(s).toLocaleString('pt-PT', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  const local = (s: string) => { const d = new Date(s); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
 
-  const Card = ({ b, kind }: { b: any; kind: string }) => (
-    <div className={`booking-row k-${kind}`}>
-      <div className="booking-main">
-        <div className="booking-when">{fmt(b.booking_date)}</div>
-        <div className="booking-who">{b.customer_name} · {b.plate}</div>
-        <div className="booking-veh">{b.brand} {b.model}</div>
+  const guardar = async () => {
+    if (busy) return
+    if (![form.customerName, form.customerPhone, form.plate, form.make, form.model, form.note].some((x: string) => (x || '').trim())) {
+      setMsg({ kind: 'err', text: 'Escreve pelo menos uma coisa: um nome, um contacto, o carro ou o que precisa.' }); return
+    }
+    setBusy(true); setMsg(null)
+    try {
+      const body = JSON.stringify({ customerName: form.customerName || null, customerPhone: form.customerPhone || null, plate: form.plate || null,
+        make: form.make || null, model: form.model || null, note: form.note || null, bookingDate: form.bookingDate ? new Date(form.bookingDate).toISOString() : null })
+      await api(form.id ? `/api/v1/bookings/leads/${form.id}/update` : '/api/v1/bookings/quick', { method: 'POST', body })
+      setMsg({ kind: 'ok', text: form.id ? 'Marcação alterada.' : 'Marcação registada.' }); setForm(null); load()
+    } catch (e: any) { falha(e, 'Não foi possível guardar a marcação.') }
+    finally { setBusy(false) }
+  }
+  const doCancel = async () => {
+    const i = cancelar; if (!i || !cancelReason) return
+    try {
+      if (i.simples) await api(`/api/v1/bookings/leads/${i.id}/cancel`, { method: 'POST', body: JSON.stringify({ reason: [cancelReason, cancelNote].filter(Boolean).join(' — ') }) })
+      else await api(`/api/v1/bookings/${i.id}/cancel`, { method: 'POST', body: JSON.stringify({ reason: cancelReason, note: cancelNote || undefined }) })
+      setCancelar(null); setCancelReason(''); setCancelNote(''); setMsg({ kind: 'ok', text: 'Marcação cancelada.' }); load()
+    } catch (e: any) { setCancelar(null); falha(e, 'Não foi possível cancelar.') }
+  }
+  const doRemarcar = async () => {
+    const i = remarcar; if (!i || !newDate) return
+    try {
+      const iso = new Date(newDate).toISOString()
+      if (i.simples) await api(`/api/v1/bookings/leads/${i.id}/update`, { method: 'POST', body: JSON.stringify({ bookingDate: iso }) })
+      else await api(`/api/v1/bookings/${i.id}/reschedule`, { method: 'POST', body: JSON.stringify({ bookingDate: iso }) })
+      setRemarcar(null); setNewDate(''); setMsg({ kind: 'ok', text: 'Marcação remarcada.' }); load()
+    } catch (e: any) { setRemarcar(null); falha(e, 'Não foi possível remarcar.') }
+  }
+  const editar = (i: any) => setForm({ id: i.id, customerName: i.raw.customer_name || '', customerPhone: i.raw.customer_phone || '', plate: i.raw.plate || '',
+    make: i.raw.make || '', model: i.raw.model || '', note: i.raw.note || '', bookingDate: i.when ? local(i.when) : '' })
+
+  const cartao = (i: any, tom: string) => (
+    <div key={i.key} className={`car-card marc ${tom}`}>
+      <div className="marc-main">
+        <div className="marc-when">{i.when ? fmt(i.when) : 'Sem data'}{i.simples && <span className="marc-tag">Por completar</span>}</div>
+        <strong>{i.who || i.phone || 'Cliente por identificar'}{i.who && i.phone ? <span className="marc-tel"> · {i.phone}</span> : null}</strong>
+        {(i.car || i.plate) && <span>{[i.car, i.plate].filter(Boolean).join(' · ')}</span>}
+        {i.note && <p>{i.note}</p>}
       </div>
-      <div className="booking-actions">
-        <button className="btn-primary btn-sm" onClick={() => onResume(b.id)} title="Continuar entrada quando o carro chega"><i className="ti ti-arrow-right" aria-hidden="true"></i></button>
-        <button className="btn-ghost btn-sm" onClick={() => { setReschedId(b.id); setNewDate('') }} title="Remarcar"><i className="ti ti-calendar-plus" aria-hidden="true"></i></button>
-        <button className="btn-ghost btn-sm danger" onClick={() => { setCancelId(b.id); setCancelReason('') }} title="Cancelar"><i className="ti ti-x" aria-hidden="true"></i></button>
+      <div className="car-foot">
+        <span className="car-next">{i.simples ? 'Quando o carro chegar, completa-se a entrada.' : 'Ficha já começada.'}</span>
+        <div className="car-acts">
+          {podeCriar && <button className="btn-primary btn-sm" onClick={() => (i.simples ? setChegou(i) : onResume(i.id))}>Chegou</button>}
+          {podeCriar && (
+            <button className="btn-icon" aria-label="Mais opções" aria-expanded={menu === i.key} onClick={() => setMenu(menu === i.key ? null : i.key)}><i className="ti ti-dots-vertical" aria-hidden="true"></i></button>
+          )}
+          {menu === i.key && (
+            <div className="pop-menu" role="menu">
+              {i.simples && <button role="menuitem" onClick={() => { setMenu(null); editar(i) }}><i className="ti ti-pencil" aria-hidden="true"></i> Editar</button>}
+              <button role="menuitem" onClick={() => { setMenu(null); setNewDate(i.when ? local(i.when) : ''); setRemarcar(i) }}><i className="ti ti-calendar-plus" aria-hidden="true"></i> {i.when ? 'Remarcar' : 'Marcar data'}</button>
+              <button role="menuitem" className="danger" onClick={() => { setMenu(null); setCancelReason(''); setCancelNote(''); setCancelar(i) }}><i className="ti ti-x" aria-hidden="true"></i> Cancelar marcação</button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
 
   return (
-    <main className="reception">
-      <div className="rec-top" style={{ marginBottom: 16 }}>
-        <button className="btn-ghost btn-sm" onClick={onBack}><i className="ti ti-arrow-left" aria-hidden="true"></i> Início</button>
-        <h2 style={{ margin: 0, fontSize: 20 }}>Marcações</h2>
-        <span />
+    <main className="reception carros marcacoes">
+      <div className="page-head">
+        <h1>Marcações</h1>
+        <span className="page-head-sub">{itens.length} {itens.length === 1 ? 'activa' : 'activas'}</span>
       </div>
+      <Banner msg={msg} onClose={() => setMsg(null)} />
+      {menu && <div className="pop-scrim" onClick={() => setMenu(null)} />}
 
-      {cancelId && (
-        <div className="notice-overlay">
-          <div className="notice-card" style={{ textAlign: 'left', maxWidth: 420 }}>
-            <h2 style={{ textAlign: 'center' }}>Cancelar marcação</h2>
-            <label className="fl">Motivo <span className="req">*</span></label>
-            <select value={cancelReason} onChange={e => setCancelReason(e.target.value)}>
+      {podeCriar && !form && (
+        <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginBottom: 16 }} onClick={() => { setMsg(null); setForm({ ...VAZIO }) }}>
+          <i className="ti ti-calendar-plus" aria-hidden="true"></i> Nova marcação
+        </button>
+      )}
+      {form && (
+        <div className="lanc-card" style={{ marginBottom: 16 }}>
+          <h2 className="sec-title">{form.id ? 'Editar marcação' : 'Nova marcação'}</h2>
+          <p className="hint" style={{ margin: '0 0 10px' }}>Nada é obrigatório — escreve o que souberes. O resto completa-se quando o carro chegar.</p>
+          <div className="lanc-row2" style={{ marginTop: 0 }}>
+            <div><label className="fl" htmlFor="mc-nome">Nome</label><input id="mc-nome" value={form.customerName} onChange={e => setForm({ ...form, customerName: e.target.value })} autoComplete="off" /></div>
+            <div><label className="fl" htmlFor="mc-tel">Contacto</label><input id="mc-tel" inputMode="tel" value={form.customerPhone} onChange={e => setForm({ ...form, customerPhone: e.target.value })} autoComplete="off" /></div>
+          </div>
+          <div className="lanc-row2">
+            <div><label className="fl" htmlFor="mc-marca">Marca</label><input id="mc-marca" value={form.make} onChange={e => setForm({ ...form, make: e.target.value })} /></div>
+            <div><label className="fl" htmlFor="mc-modelo">Modelo</label><input id="mc-modelo" value={form.model} onChange={e => setForm({ ...form, model: e.target.value })} /></div>
+          </div>
+          <label className="fl" htmlFor="mc-mat" style={{ marginTop: 10 }}>Matrícula</label>
+          <input id="mc-mat" value={form.plate} onChange={e => setForm({ ...form, plate: e.target.value.toUpperCase() })} autoCapitalize="characters" />
+          <label className="fl" htmlFor="mc-nota" style={{ marginTop: 10 }}>O que o cliente precisa</label>
+          <textarea id="mc-nota" rows={2} value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} placeholder="ex.: luz do motor acesa, quer revisão" />
+          <label className="fl" htmlFor="mc-data" style={{ marginTop: 10 }}>Data e hora (se já estiver combinada)</label>
+          <input id="mc-data" type="datetime-local" value={form.bookingDate} onChange={e => setForm({ ...form, bookingDate: e.target.value })} />
+          <div className="lanc-acoes">
+            <button className="btn-factura" onClick={() => setForm(null)}>Cancelar</button>
+            <button className="btn-primary lanc-guardar" disabled={busy} onClick={guardar}>{busy ? 'A guardar…' : form.id ? 'Guardar alterações' : 'Guardar marcação'}</button>
+          </div>
+        </div>
+      )}
+
+      {chegou && (
+        <div className="modal-scrim" onClick={() => setChegou(null)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <div className="modal-title">O carro chegou</div>
+            <p className="modal-detail">A entrada abre já com os dados desta marcação. Completa o que faltar e a ficha fica criada.</p>
+            <div className="estado-lista">
+              <button onClick={() => { const l = chegou.raw; setChegou(null); onStart(l, 'full') }}><strong>Entrada completa</strong> — fotos, km, assinatura</button>
+              <button onClick={() => { const l = chegou.raw; setChegou(null); onStart(l, 'quick') }}><strong>Entrada rápida</strong> — serviço rápido, o cliente espera</button>
+            </div>
+            <div className="rec-nav" style={{ marginTop: 14 }}><button className="btn-ghost" onClick={() => setChegou(null)}>Cancelar</button><span /></div>
+          </div>
+        </div>
+      )}
+
+      {cancelar && (
+        <div className="modal-scrim" onClick={() => setCancelar(null)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <div className="modal-title">Cancelar marcação</div>
+            <label className="fl" htmlFor="mc-motivo" style={{ marginTop: 12 }}>Motivo</label>
+            <select id="mc-motivo" value={cancelReason} onChange={e => setCancelReason(e.target.value)}>
               <option value="">Escolher…</option>
               {CANCEL_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
-            {(cancelReason === 'Outro' || cancelReason === 'O preço' || cancelReason === 'O prazo de entrega') && (
-              <>
-                <label className="fl" style={{ marginTop: 10 }}>Detalhe {cancelReason === 'Outro' ? '(obrigatório)' : '(opcional)'}</label>
-                <input value={cancelNote} onChange={e => setCancelNote(e.target.value)} placeholder="Nota…" />
-              </>
-            )}
-            <div className="rec-nav">
-              <button className="btn-ghost" onClick={() => setCancelId(null)}>Voltar</button>
+            <label className="fl" htmlFor="mc-det" style={{ marginTop: 10 }}>Detalhe {cancelReason === 'Outro' ? '' : '(opcional)'}</label>
+            <input id="mc-det" value={cancelNote} onChange={e => setCancelNote(e.target.value)} />
+            <div className="rec-nav" style={{ marginTop: 16 }}>
+              <button className="btn-ghost" onClick={() => setCancelar(null)}>Voltar</button>
               <button className="btn-primary" disabled={!cancelReason || (cancelReason === 'Outro' && !cancelNote.trim())} onClick={doCancel}>Cancelar marcação</button>
             </div>
           </div>
         </div>
       )}
 
-      {reschedId && (
-        <div className="notice-overlay">
-          <div className="notice-card" style={{ maxWidth: 380 }}>
-            <h2>Remarcar</h2>
-            <label className="fl">Nova data e hora</label>
-            <input type="datetime-local" value={newDate} onChange={e => setNewDate(e.target.value)} />
-            <div className="rec-nav">
-              <button className="btn-ghost" onClick={() => setReschedId(null)}>Voltar</button>
-              <button className="btn-primary" disabled={!newDate} onClick={doResched}>Guardar</button>
+      {remarcar && (
+        <div className="modal-scrim" onClick={() => setRemarcar(null)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <div className="modal-title">{remarcar.when ? 'Remarcar' : 'Marcar data'}</div>
+            <label className="fl" htmlFor="mc-nova" style={{ marginTop: 12 }}>Nova data e hora</label>
+            <input id="mc-nova" type="datetime-local" value={newDate} onChange={e => setNewDate(e.target.value)} />
+            <div className="rec-nav" style={{ marginTop: 16 }}>
+              <button className="btn-ghost" onClick={() => setRemarcar(null)}>Voltar</button>
+              <button className="btn-primary" disabled={!newDate} onClick={doRemarcar}>Guardar</button>
             </div>
           </div>
         </div>
       )}
 
-      {loading ? <p className="empty">A carregar…</p> : list.length === 0 ? (
-        <p className="empty">Sem marcações activas. Cria uma recepção com data de marcação para ela aparecer aqui.</p>
-      ) : (
-        <>
-          {late.length > 0 && (
-            <div className="booking-group">
-              <div className="booking-group-title late"><i className="ti ti-alert-circle" aria-hidden="true"></i> Em atraso / não compareceram ({late.length})</div>
-              {late.map(b => <Card key={b.id} b={b} kind="late" />)}
-            </div>
-          )}
-          {today.length > 0 && (
-            <div className="booking-group">
-              <div className="booking-group-title today"><i className="ti ti-calendar-due" aria-hidden="true"></i> Hoje ({today.length})</div>
-              {today.map(b => <Card key={b.id} b={b} kind="today" />)}
-            </div>
-          )}
-          {future.length > 0 && (
-            <div className="booking-group">
-              <div className="booking-group-title"><i className="ti ti-calendar" aria-hidden="true"></i> Próximas ({future.length})</div>
-              {future.map(b => <Card key={b.id} b={b} kind="future" />)}
-            </div>
-          )}
-        </>
-      )}
+      {loading ? <p className="empty">A carregar…</p> : itens.length === 0 ? (
+        <p className="empty">Sem marcações activas.</p>
+      ) : G.map(([k, titulo, tom]) => {
+        const lista = itens.filter(i => grupo(i) === k).sort(ord)
+        if (!lista.length) return null
+        return (
+          <section key={k} style={{ marginBottom: 20 }}>
+            <h2 className={`sec-title ${tom === 'late' ? 'tom-aviso' : ''}`}>{titulo} · {lista.length}</h2>
+            <div className="car-list">{lista.map(i => cartao(i, tom))}</div>
+          </section>
+        )
+      })}
     </main>
   )
 }
@@ -6197,6 +6296,8 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry, onLancarGasto,
             {starting ? 'A iniciar…' : 'Começar o diagnóstico'}
           </button>
         </div>
+        {/* O scan pode fazer-se logo à chegada, antes de alguém começar o diagnóstico */}
+        <div style={{ maxWidth: 520, margin: '16px auto 0' }}><ScanBox joId={joId} onChanged={load} /></div>
       </main>
     )
   }
@@ -6360,7 +6461,9 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry, onLancarGasto,
 
   // O PRÓXIMO PASSO — uma frase e, se for a vez de quem está a ver, um botão.
   let passo: { txt: string; btn?: string; run?: () => void; fraco?: boolean } | null = null
-  if (isDiag) passo = problems.length === 0
+  const faltaScan = (data?.scanRequired ?? true) && jo.scan_status === 'pending'
+  if (isDiag && faltaScan) passo = { txt: 'Falta o diagnóstico electrónico (scan): junta o relatório da máquina.', btn: aba === 'diag' ? undefined : 'Ir ao diagnóstico', run: () => setTab('diag') }
+  else if (isDiag) passo = problems.length === 0
     ? { txt: 'Regista os problemas encontrados no carro.', btn: aba === 'diag' ? undefined : 'Ir ao diagnóstico', run: () => setTab('diag') }
     : { txt: `${problems.length} ${problems.length === 1 ? 'problema registado' : 'problemas registados'}. Quando estiver completo, submete.`, btn: authOn ? 'Submeter diagnóstico' : 'Concluir diagnóstico', run: submitDiagnosis }
   else if (isReview) passo = iSubmitted
@@ -6433,6 +6536,7 @@ function OrderService({ joId, onBack, myId, isOwner, onOpenEntry, onLancarGasto,
             {jo.diag_rejected_note && isDiag && (
               <div className="os-reject-note"><i className="ti ti-alert-triangle" aria-hidden="true"></i> Diagnóstico devolvido: {jo.diag_rejected_note}</div>
             )}
+            {(faseIdx <= 1 || jo.scan_status !== 'exempt' || jo.scan_exempt_reason !== 'Entrou antes desta regra') && <ScanBox joId={joId} onChanged={load} />}
             <h2 className="sec-title">Problemas encontrados</h2>
             <div className="prob-list">
               {problems.map((p: any) => (
@@ -6832,6 +6936,7 @@ function Definicoes() {
       await api('/api/v1/settings/workshop', { method: 'PUT', body: JSON.stringify({
         name: w.name, nuit: w.nuit || null, phone: w.phone || null, email: w.email || null, address: w.address || null,
         brandColor: w.brand_primary_color, diagAuthorizationOn: !!w.diag_authorization_on, allowThirdPartySigner: !!w.allow_third_party_signer,
+        scanRequired: w.scan_required !== false,
         staleDays: Math.min(60, Math.max(1, parseInt(String(w.stale_days ?? 3), 10) || 3)) }) })
       // aplica já o nome e a cor a esta sessão (os outros apanham na próxima entrada)
       const s = useSession.getState()
@@ -6902,6 +7007,10 @@ function Definicoes() {
               <div className="regra">
                 <div><strong>Diagnóstico precisa de autorização</strong><span>Depois de submetido, a gestão tem de o autorizar antes de seguir para orçamento.</span></div>
                 <Sw on={!!w.diag_authorization_on} onChange={v => setW({ ...w, diag_authorization_on: v })} label="Diagnóstico precisa de autorização" />
+              </div>
+              <div className="regra">
+                <div><strong>Diagnóstico electrónico (scan) obrigatório</strong><span>Todos os carros têm de ter o relatório do scan (PDF ou fotos), ou uma excepção justificada pela gestão, antes de o diagnóstico ser fechado.</span></div>
+                <Sw on={w.scan_required !== false} onChange={v => setW({ ...w, scan_required: v })} label="Diagnóstico electrónico obrigatório" />
               </div>
               <div className="regra">
                 <div><strong>Prazo dos pendentes parados</strong><span>Ao fim de quantos dias sem movimento a app começa a insistir com a gestão (carros, marcações e entradas por acabar).</span></div>
@@ -6976,6 +7085,120 @@ function Definicoes() {
         </>
       )}
     </main>
+  )
+}
+
+// ── DIAGNÓSTICO ELECTRÓNICO (scan) ───────────────────────────
+// Obrigatório em todos os carros (cada oficina pode desligar): PDF
+// ou várias fotos. Sem ele — ou sem uma excepção justificada pela
+// gestão — o diagnóstico não pode ser submetido.
+function ScanBox({ joId, onChanged }: { joId: string; onChanged?: () => void }) {
+  const podeGerir = useSession(s => s.can('os:manage'))
+  const [d, setD] = useState<any>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [nota, setNota] = useState('')
+  const [exc, setExc] = useState<any>(null)             // { reason, note }
+  const fotosRef = useRef<HTMLInputElement>(null), pdfRef = useRef<HTMLInputElement>(null)
+  const load = () => api(`/api/v1/os/${joId}/scan`).then(r => { setD(r); setNota(n => n || r.note || '') }).catch((e: any) => setErr(e?.message || 'Não foi possível carregar o scan.'))
+  useEffect(() => { load() }, [joId])
+
+  const b64 = (blob: Blob) => new Promise<string>((res, rej) => {
+    const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.onerror = () => rej(new Error('Não foi possível ler o ficheiro.')); fr.readAsDataURL(blob)
+  })
+  const enviar = async (files: FileList | null) => {
+    if (!files || !files.length) return
+    setErr(null)
+    const lista = Array.from(files); let falhas = 0
+    for (let i = 0; i < lista.length; i++) {
+      const f = lista[i]
+      setBusy(`A enviar ${i + 1} de ${lista.length}…`)
+      try {
+        const ePdf = f.type === 'application/pdf'
+        if (!ePdf && !f.type.startsWith('image/')) { falhas++; continue }
+        if (ePdf && f.size > 10 * 1024 * 1024) { setErr(`"${f.name}" tem mais de 10 MB.`); falhas++; continue }
+        const blob = ePdf ? f : await compressImage(f, 1800, 0.8)
+        await api(`/api/v1/os/${joId}/scan/files`, { method: 'POST', body: JSON.stringify({ fileBase64: await b64(blob), fileName: f.name, contentType: ePdf ? 'application/pdf' : 'image/jpeg' }) })
+      } catch (e: any) { falhas++; setErr(e?.message || 'Um ficheiro não subiu.') }
+    }
+    setBusy(null)
+    if (falhas && !err) setErr(falhas === 1 ? 'Um ficheiro não subiu. Tenta de novo.' : `${falhas} ficheiros não subiram. Tenta de novo.`)
+    load()
+  }
+  const acao = async (url: string, body: any, okFn?: () => void) => {
+    setErr(null); setBusy('A guardar…')
+    try { await api(url, { method: 'POST', body: JSON.stringify(body || {}) }); okFn?.(); await load(); onChanged?.() }
+    catch (e: any) { setErr(e?.message || 'Não foi possível guardar.') }
+    finally { setBusy(null) }
+  }
+  const tirar = async (fid: string) => {
+    try { await api(`/api/v1/os/${joId}/scan/files/${fid}`, { method: 'DELETE' }); load() } catch (e: any) { setErr(e?.message || 'Não foi possível tirar o ficheiro.') }
+  }
+
+  if (!d) return <div className="scan-box"><div className="scan-head"><strong>Diagnóstico electrónico</strong></div>{err ? <div className="field-warn">{err}</div> : <p className="hint" style={{ margin: 0 }}>A carregar…</p>}</div>
+  const feito = d.status === 'done', dispensado = d.status === 'exempt', aberto = d.status === 'pending'
+  const quando = d.at ? new Date(d.at).toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''
+  return (
+    <div className={`scan-box ${feito ? 'ok' : dispensado ? 'exc' : d.required ? 'falta' : ''}`}>
+      <div className="scan-head">
+        <i className={`ti ${feito ? 'ti-circle-check' : dispensado ? 'ti-info-circle' : 'ti-plug-connected'}`} aria-hidden="true"></i>
+        <strong>Diagnóstico electrónico (scan)</strong>
+        <span className={`pill ${feito ? 'ph-working' : dispensado ? '' : d.required ? 'ph-quote' : ''}`}>{feito ? 'Feito' : dispensado ? 'Dispensado' : d.required ? 'Por fazer' : 'Opcional'}</span>
+      </div>
+      {aberto && <p className="scan-txt">{d.required ? 'Obrigatório antes de fechar o diagnóstico. ' : ''}Junta o relatório da máquina: um PDF ou as fotos do ecrã, as que forem precisas.</p>}
+      {feito && <p className="scan-txt">Concluído{d.by ? ` por ${d.by}` : ''}{quando ? ` · ${quando}` : ''}.{d.note ? ` ${d.note}` : ''}</p>}
+      {dispensado && <p className="scan-txt">Sem scan: <strong>{d.exemptReason}</strong>{d.note ? ` — ${d.note}` : ''}{d.by ? ` · ${d.by}` : ''}{quando ? ` · ${quando}` : ''}</p>}
+
+      {d.files.length > 0 && (
+        <div className="scan-files">
+          {d.files.map((f: any) => (
+            <div key={f.id} className="scan-file">
+              <a href={f.url || '#'} target="_blank" rel="noreferrer" aria-label={`Abrir ${f.name || 'ficheiro'}`}>
+                {f.type === 'application/pdf' ? <span className="scan-pdf"><i className="ti ti-file-type-pdf" aria-hidden="true"></i></span> : <img src={f.url || ''} alt={f.name || 'Fotografia do scan'} />}
+              </a>
+              <span className="scan-file-n">{f.type === 'application/pdf' ? (f.name || 'PDF') : 'Foto'}</span>
+              {(aberto || podeGerir) && (f.mine || podeGerir) && <button className="scan-file-x" aria-label={`Tirar ${f.name || 'ficheiro'}`} onClick={() => tirar(f.id)}><i className="ti ti-x" aria-hidden="true"></i></button>}
+            </div>
+          ))}
+        </div>
+      )}
+      {err && <div className="field-warn" style={{ marginTop: 8 }}>{err}</div>}
+      {busy && <div className="scan-busy" role="status"><i className="ti ti-loader-2 spin" aria-hidden="true"></i> {busy}</div>}
+
+      <input ref={fotosRef} type="file" accept="image/*" multiple hidden onChange={e => { enviar(e.target.files); e.target.value = '' }} />
+      <input ref={pdfRef} type="file" accept="application/pdf" multiple hidden onChange={e => { enviar(e.target.files); e.target.value = '' }} />
+      {aberto && (
+        <>
+          <div className="scan-acts">
+            <button className="btn-factura" disabled={!!busy} onClick={() => fotosRef.current?.click()}><i className="ti ti-camera" aria-hidden="true"></i> Juntar fotos</button>
+            <button className="btn-factura" disabled={!!busy} onClick={() => pdfRef.current?.click()}><i className="ti ti-file-type-pdf" aria-hidden="true"></i> Juntar PDF</button>
+          </div>
+          {d.files.length > 0 && (
+            <>
+              <label className="fl" htmlFor={`scan-nota-${joId}`} style={{ marginTop: 10 }}>Resumo do que apareceu (opcional)</label>
+              <input id={`scan-nota-${joId}`} value={nota} onChange={e => setNota(e.target.value)} placeholder="ex.: 3 erros no motor, 1 na caixa" />
+              <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 10 }} disabled={!!busy} onClick={() => acao(`/api/v1/os/${joId}/scan/done`, { note: nota })}>Concluir scan</button>
+            </>
+          )}
+          {podeGerir && !exc && <button className="lanc-link" onClick={() => setExc({ reason: '', note: '' })}>Não é possível fazer o scan neste carro</button>}
+          {!podeGerir && d.required && <p className="hint" style={{ margin: '10px 0 0' }}>Se não for possível fazer o scan, a gestão tem de justificar a excepção.</p>}
+          {exc && (
+            <div className="scan-exc">
+              <div className="fl">Porque não se faz o scan?</div>
+              <div className="chips">
+                {(d.exemptReasons || []).map((m: string) => <button key={m} className={`chip ${exc.reason === m ? 'on' : ''}`} aria-pressed={exc.reason === m} onClick={() => setExc({ ...exc, reason: m })}>{m}</button>)}
+              </div>
+              <input style={{ marginTop: 8 }} aria-label="Nota da excepção" value={exc.note} onChange={e => setExc({ ...exc, note: e.target.value })} placeholder={exc.reason === 'Outro' ? 'Explica em poucas palavras' : 'Nota (opcional)'} />
+              <div className="rec-nav" style={{ marginTop: 10 }}>
+                <button className="btn-ghost" onClick={() => setExc(null)}>Voltar</button>
+                <button className="btn-primary" disabled={!exc.reason || (exc.reason === 'Outro' && exc.note.trim().length < 3) || !!busy} onClick={() => acao(`/api/v1/os/${joId}/scan/exempt`, { reason: exc.reason, note: exc.note || null }, () => setExc(null))}>Registar excepção</button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+      {!aberto && podeGerir && <button className="lanc-link" onClick={() => acao(`/api/v1/os/${joId}/scan/reopen`, {})}>{feito ? 'Reabrir para juntar mais ficheiros' : 'Afinal dá para fazer o scan'}</button>}
+    </div>
   )
 }
 
